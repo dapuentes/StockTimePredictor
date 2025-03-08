@@ -1,0 +1,39 @@
+---
+title: "Redes Neuronales"
+author: "Daniel Felipe Puentes Rocha"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+Creando un modelo de machine learning
+```{r}
+library(dplyr)
+data_ml <- data %>%
+    mutate(lag1 = lag(data$NU_Historical_Data.Price, 1),
+           lag2 = lag(data$NU_Historical_Data.Price, 2),
+           lag3 = lag(data$NU_Historical_Data.Price, 3)) %>%
+    na.omit()
+```
+
+Ahora, dividiendo el conjunto de datos entre datos train y test:
+
+```{r}
+train <- head(data_ml, round(0.8 * nrow(data_ml)))
+test <- tail(data_ml, round(0.2 * nrow(data_ml)))
+```
+
+Entrenando el modelo por el metodo de ramdom forest:
+
+```{r}
+library(randomForest)
+model_rf <- randomForest(NU_Historical_Data.Price ~ ., data = train)
+```
+
+Ahora, evaluando el modelo:
+
+```{r}
+pred_rf <- predict(model_rf, test)
+rmse <- sqrt(mean((pred_rf - test$NU_Historical_Data.Price)^2))
+print(rmse)
+```
+
