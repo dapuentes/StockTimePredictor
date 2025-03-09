@@ -1,0 +1,159 @@
+---
+title: "Predicciones Bayesianans"
+output: pdf_document
+author: "Daniel Puentes"
+date: "2025-01-19"
+---
+
+Como ultima tecnica de pronostico, se utilizará inferencia bayesiana. En el que se busca modelar una distribución posterior basado en datos previos que se conozcan acerca de la serie de tiempo, es decir:
+
+$$p(\theta|y) = \frac{p(y|\theta)p(\theta)}{p(y)}$$
+Inicialmente se carga la base de datos y se ajusta la serie de tiempo:
+
+```{r}
+library(dlm)
+library(readr)
+library(xts)
+NU_Historical_Data <- read_csv("NU Historical Data.csv")
+data <- data.frame(Date = as.Date(NU_Historical_Data$Date, format = "%m/%d/%Y"), 
+                   Price = NU_Historical_Data$Price)
+
+serie <- xts(data$Price, order.by = data$Date)
+y <- serie["2021-12-10/2024-10-08"]
+```
+
+De tecnicas anteriores se sabe que la serie de tiempo se puede ajustar a un modelo ARIMA(3,0,3) + GARCH(1,1):
+
+$$y_t = \mu + \phi_1 y_{t-1} + \phi_2 y_{t-2} + \phi_3 y_{t-3} 
++ \theta_1 \varepsilon_{t-1} + \theta_2 \varepsilon_{t-2} + \theta_3 \varepsilon_{t-3} + \varepsilon_t$$
+
+Donde los valores de los parametros se ajustaran en un modelo Stan para analizar y predecir la serie de tiempo
+
+Ahora, se procede a preparar los datos para el modelo Stan:
+
+```{r}
+library(rstan)
+
+diff_y <- (as.numeric(y))
+N <- length(diff_y)
+
+stan_data <- list(
+  N = N,
+  y = diff_y,
+  H = 10
+)
+```
+
+Se procede a ajustar el modelo Stan:
+
+```{r}
+model <- stan_model("modelo.stan")
+
+fit <- sampling(model,
+                data = stan_data,
+                chains = 3,
+                iter = 10000
+)
+```
+
+Una vez ajustado el modelo, se procede a realizar las predicciones, con un sus intervalos de confianza:
+
+```{r}
+predictions <- extract(fit)$y_forecast
+pred_intervals <- apply(predictions, 2, quantile, probs=c(0.025, 0.5, 0.975))
+```
+
+Para visualizar de forma mas clara los resultados, se procede a graficar las predicciones y compararlas con los datos reales:
+
+```{r}
+# Convertir predicciones a dataframe con fechas
+last_date <- tail(index(y), 1)
+future_dates <- seq(last_date, by = "day", length.out = dim(predictions)[2])
+
+pred_df <- data.frame(
+  date = future_dates,
+  lower = apply(predictions, 2, quantile, probs = 0.025),
+  median = apply(predictions, 2, quantile, probs = 0.5),
+  upper = apply(predictions, 2, quantile, probs = 0.975)
+)
+
+datos_reales_df <- data.frame(
+  date = index(serie["2024-10-08/2024-10-18"]),
+  price = as.numeric(serie["2024-10-08/2024-10-18"])
+)
+
+# Graficar con ggplot
+library(ggplot2)
+ggplot() + 
+  geom_line(data = data.frame(date = index(y), price = as.numeric(y)), 
+            aes(x = date, y = price, color = "Historico")) +
+  geom_line(data = pred_df, 
+            aes(x = date, y = median, color = "Pronostico")) +
+  geom_line(data = datos_reales_df,
+            aes(x = date, y = price, color = "Datos reales"),
+            linetype = "dashed") +
+  geom_ribbon(data = pred_df, 
+              aes(x = date, ymin = lower, ymax = upper), 
+              alpha = 0.2) +
+  xlim(c(as.Date("2024-09-09"), as.Date("2024-10-30"))) +
+  labs(title = "Pronostico vs Datos Reales", 
+       x = "Fecha", 
+       y = "Precio") +
+  theme_minimal() +
+  scale_color_manual(name = "Series",
+                    values = c("Historico" = "black",
+                             "Pronostico" = "red",
+                             "Datos reales" = "blue"))
+```
+
+Ahora, para evaluar el rendimiento del modelo, se calcularan los errores MAE, MAPE y RMSE:
+
+```{r}
+pred_values <- pred_df$median[1:length(datos_reales_df$price)]
+real_values <- datos_reales_df$price
+
+# MAE (Mean Absolute Error)
+mae <- mean(abs(pred_values - real_values))
+
+# MAPE (Mean Absolute Percentage Error)
+mape <- mean(abs((pred_values - real_values) / real_values))
+
+# RMSE (Root Mean Squared Error)
+rmse <- sqrt(mean((pred_values - real_values)^2))
+
+print(paste("MAE:", mae))
+print(paste("MAPE:", mape))
+print(paste("RMSE:", rmse))
+```
+
+Los errores obtenidos son considerablemente mas bajos que los obtenidos con las tecnicas anteriores, mostrando un rendimiento superior por parte del modelo bayesiano.
+
+Adicionalmente, estos errores se pueden visualizar en la siguiente grafica:
+
+```{r}
+error_df <- data.frame(
+  date = datos_reales_df$date,
+  error_abs = abs(pred_values - real_values),
+  error_pct = abs((pred_values - real_values) / real_values) * 100
+)
+
+ggplot(error_df, aes(x = date)) +
+  geom_line(aes(y = error_abs, color = "Error Absoluto")) +
+  geom_line(aes(y = error_pct, color = "Error Porcentual")) +
+  labs(title = "Errores en las Predicciones",
+       x = "Fecha",
+       y = "Error") +
+  theme_minimal() +
+  scale_color_manual(name = "Tipo de Error",
+                     values = c("Error Absoluto" = "blue",
+                                "Error Porcentual" = "red"))
+
+```
+
+
+Referencias:
+
+- https://digitalcommons.usu.edu/cgi/viewcontent.cgi?article=1837&context=gradreports
+- https://people.bordeaux.inria.fr/pierre.delmoral/dynamics-linear-models.petris_et_al.pdf
+- https://rpubs.com/ma-riviere/stan-predict
+- https://rpubs.com/jonkorn81/458571
