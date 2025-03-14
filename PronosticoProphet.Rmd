@@ -22,11 +22,11 @@ Inicialmente, se cargan los datos:
 ```{r}
 library(prophet)
 
-NU_Historical_Data <- read.csv("NU Historical Data.csv", header = TRUE)
-data <- data.frame(NU_Historical_Data$Date, NU_Historical_Data$Price)
-data$NU_Historical_Data.Date <- as.Date(data$NU_Historical_Data.Date, format = "%m/%d/%Y")
+NU_Historical_Data <- read_csv("NU_Historical_Data.csv")
 
-data <- data[nrow(data):1, ] # Orden de data base corregido
+NU_Historical_Data <- NU_Historical_Data[-1,]
+data <- data.frame(Date = as.Date(NU_Historical_Data$Date, format = "%m/%d/%Y"), 
+                   Price = as.double(NU_Historical_Data$Close))
 ```
 
 
@@ -116,9 +116,4 @@ eficiencia <- data.frame(RMSE = rmse, MAE = mae, MAPE = mape)
 print(eficiencia)
 ```
 
-Se calcularon los residuos para analizar el comportamiento de los errores:
-
-```{r}
-data2$residuals <- data2$y - forecast2$yhat
-```
 
