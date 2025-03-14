@@ -1,21 +1,5 @@
 library(forecast)
 library(readr)
-NU_Historical_Data <- read_csv("NU Historical Data.csv")
-data <- data.frame(NU_Historical_Data$Date, NU_Historical_Data$Price)
-data$NU_Historical_Data.Date <- as.Date(data$NU_Historical_Data.Date, format = "%m/%d/%Y")
-
-library(xts)
-serie_prueba <- xts(data[, -1], order.by = data$NU_Historical_Data.Date)
-serie <- serie_prueba["2021-12-10/2024-10-08"] #Eliminando los ultimos 10 dias de la serie
-
-library(urca)
-df_prueba <- ur.df(serie, type = "trend", lags = 1)
-summary(df_prueba)
-
-serie_diferenciada <- na.omit(diff(serie))
-df_prueba_diff <- ur.df(serie_diferenciada, type = "none", lags = 1)
-summary(df_prueba_diff)
-
 modelo <- Arima(serie, order = c(3,1,3))
 
 residuos <- modelo$residuals
@@ -23,14 +7,15 @@ residuos <- modelo$residuals
 # Prueba para residuos al cuadrado
 Box.test(residuos^2, lag = 10, type = "Ljung-Box") # La prueba muestra que se rechaza la hipotesis nula de que los residuos son ruido blanco
 
+rendimiento <- diff((serie))
+
 library(rugarch)
-spec <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
-                   mean.model = list(armaOrder = c(3,2), include.mean = TRUE),
-                   distribution.model = "std",
-                   fixed.pars = list(omega = 0)
+spec <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(2,2), include.mean = TRUE),
+                   distribution.model = "std"
 )
-garch_fit <- ugarchfit(spec = spec, data = serie)
-garch_fit
+garch_fit <- ugarchfit(spec = spec, data = rendimiento)
+garch_fit # Queda un modelo egarch(1,1) - arima(2,1,2), es normal que se reduzca el orden del ARMA
 plot(garch_fit)
 
 # Verificando si los residuos estandarizados son ruido blanco
@@ -50,4 +35,4 @@ pronostico <- forecast_garch@forecast$seriesFor
 
 plot(volatilidad)
 plot(pronostico)
-plot(forecast_garch, ylim = c(14,15))
+plot(forecast_garch, ylim = c(10,15))
