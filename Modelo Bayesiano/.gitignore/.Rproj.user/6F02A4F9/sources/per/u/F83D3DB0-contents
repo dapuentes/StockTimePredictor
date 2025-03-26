@@ -1,0 +1,7 @@
+library(plumber)
+# Crear API Plumber
+pr <- plumber::pr("api.R")
+
+# Añadir endpoints
+pr %>%
+  pr_run(port = 8000)

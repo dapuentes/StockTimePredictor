@@ -1,0 +1,27 @@
+{
+    "id": "CD9B5862",
+    "path": "C:/Users/dani_/OneDrive/Escritorio/Prueba ST/Modelo Bayesiano/R/run_forecast.R",
+    "project_path": "run_forecast.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1742933713306.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "13,46",
+        "scrollLine": "4"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1742938796,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1742938796901,
+    "read_only": false,
+    "read_only_alternatives": []
+}

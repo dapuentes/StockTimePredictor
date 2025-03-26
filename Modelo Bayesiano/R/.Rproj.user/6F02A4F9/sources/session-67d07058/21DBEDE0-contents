@@ -1,0 +1,29 @@
+source("ModeloStan.R")
+
+forecast_arima_prices <- function(fit, original_series, d = 1, horizon = 10) {
+  require(xts)
+  
+  # Diferenciar serie
+  serie_diff <- diff(original_series, differences = d)[-1]
+  last_value <- tail(original_series, 1)
+  
+  # Ajustar modelo
+  samples <- extract(fit)
+  
+  # Calcular pronósticos
+  forecasts <- apply(samples$y_hat, 2, function(x) {
+    c(
+      mean = mean(x),
+      lower = quantile(x, 0.05),
+      upper = quantile(x, 0.95)
+    )
+  })
+  
+  # Crear serie temporal
+  forecast_dates <- seq(end(original_series), by = "day", length.out = horizon + 1)[-1]
+  
+  xts(
+    t(forecasts),
+    order.by = forecast_dates
+  )
+}
