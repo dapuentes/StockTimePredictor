@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  stanpython:
+    build: ./StanPython
+  ports:
+    - "8000:8000" # Se exponen los puertos 8000 del contenedor al host para acceder a la aplicación
+  volumes:
+    - data_volume:/app/data # Se monta un volumen para persistir los datos entre contenedores
+
+  update_nu:
+    build: ./UpdateNu
+    volumes:
+      - data_volume:/app/data # Se monta el mismo volumen que en stanpython para compartir datos entre contenedores
+      # Dado que el contenedor de UpdateNu no necesita exponer puertos porque se ejecuta y se detiene, no es necesario especificar la sección de ports aquí.
