@@ -15,7 +15,19 @@ Además, se incluye un script de prueba (`prueba_modelo.py`) que ejecuta el fluj
 
 ## Estructura del Proyecto
 
-mi_proyecto/ ├── api.py # Archivo principal de la API FastAPI ├── py/ │ └── ModeloStan.py # Módulo con las funciones generate_arima_price_stan y forecast_arima_prices ├── data/ │ └── NU_Historical_Data.csv # Archivo CSV con datos históricos de precios ├── prueba_modelo.py # Script de prueba para ejecutar el flujo completo ├── requirements.txt # Lista de dependencias del proyecto ├── Dockerfile # Archivo para construir la imagen Docker ├── .gitignore # Archivos y carpetas a ignorar (incluye el entorno virtual) └── README.md # Este archivo
+``` bash
+StanPython/ 
+├── api.py # Archivo principal de la API FastAPI
+├── py/ 
+│   └── ModeloStan.py # Módulo con las funciones generate_arima_price_stan y forecast_arima_prices
+├── data/ 
+│   └── NU_Historical_Data.csv # Archivo CSV con datos históricos de precios
+├── prueba_modelo.py # Script de prueba para ejecutar el flujo completo 
+├── requirements.txt # Lista de dependencias del proyecto 
+├── Dockerfile # Archivo para construir la imagen Docker 
+├── .gitignore # Archivos y carpetas a ignorar (incluye el entorno virtual) 
+└── README.md # Este archivo
+```
 
 ## Uso Local
 
