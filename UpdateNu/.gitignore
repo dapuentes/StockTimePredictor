@@ -1,0 +1,6 @@
+# Entorno virtual de Python
+.venv/
+
+# Directorios de compilación y distribución
+build/
+dist/
