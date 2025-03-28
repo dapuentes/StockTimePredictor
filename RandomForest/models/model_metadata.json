@@ -1,0 +1,14 @@
+{
+    "best_params": {
+        "max_depth": 5,
+        "max_features": 0.5,
+        "min_samples_leaf": 10,
+        "min_samples_split": 5,
+        "n_estimators": 100
+    },
+    "mse_test": 1.4043926566289684,
+    "mae_test": 0.9137083841713515,
+    "rmse_test": 1.1850707390822577,
+    "mse_train": 0.06598493892356422,
+    "timestamp": "2025-03-27T20:42:27.464708"
+}

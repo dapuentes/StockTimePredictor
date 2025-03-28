@@ -1,0 +1,10 @@
+# Entorno virtual de Python
+.venv/
+.env
+
+# Ignorar archivos de caché de Python
+__pycache__/
+*.pyc
+
+# Ignorar archivos generados por Docker
+*.log
