@@ -102,10 +102,9 @@ async def predict(
         try:
             response = await client.get(service_url, params=params)
             response.raise_for_status()  # Lanza un error
+            return response.json()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error in sending request to microservice: {e}")
-        
-    return response.json()
 
 @app.get("/health")
 async def health_check():
