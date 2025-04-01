@@ -141,14 +141,13 @@ async def predict(
     GET /predict?ticket=NU&forecast_horizon=10&target_col=Close
     """
     try:
-        # 1. Buscar el modelo para el ticket
+        # Verificar que el ticket no esté vacío
         model_path = find_model_for_ticket(ticket)
         if model_path is None:
             raise HTTPException(
                 status_code=404, 
                 detail=f"No trained model found for {ticket}. Train a model first.")
         
-        # 2. Cargar el modelo
         try:
             model = TimeSeriesRandomForestModel.load_model(model_path)
             print(f"Model loaded successfully from {model_path}")
@@ -166,7 +165,6 @@ async def predict(
                 detail=f"Error loading model: {str(model_error)}"
             )
         
-        # 3. Cargar datos con un período más largo para asegurar suficientes datos
         try:
             end_date = datetime.now()
             # Usar un período más largo para asegurar suficientes datos
@@ -189,7 +187,7 @@ async def predict(
                 )
                 
             # Verificar que hay suficientes filas para los rezagos
-            if len(data) <= model.n_lags * 2:  # Multiplicamos por 2 para tener un margen
+            if len(data) <= model.n_lags * 2:  
                 raise HTTPException(
                     status_code=400,
                     detail=f"Not enough historical data for prediction. Need at least {model.n_lags * 2} rows, but got {len(data)}."
@@ -203,9 +201,7 @@ async def predict(
                 detail=f"Error loading stock data: {str(data_error)}"
             )
         
-        # 4. Preparar datos y hacer predicción
         try:
-            # Usamos directamente la función forecast_future_prices sin modificarla
             forecast = forecast_future_prices(
                 model=model,
                 data=data,
@@ -213,7 +209,6 @@ async def predict(
                 target_col=target_col
             )
             
-            # 5. Preparar respuesta
             last_date = data.index[-1]
             forecast_dates = [(last_date + timedelta(days=i+1)).strftime("%Y-%m-%d") 
                             for i in range(forecast_horizon)]
@@ -236,12 +231,10 @@ async def predict(
             }
             
         except Exception as forecast_error:
-            # Capturar detalles específicos del error para depuración
             import traceback
             error_details = traceback.format_exc()
             print(f"Forecast error details: {error_details}")
             
-            # Proporcionar un mensaje de error más descriptivo
             if "Found array with 0 sample(s)" in str(forecast_error):
                 raise HTTPException(
                     status_code=500,
@@ -256,7 +249,6 @@ async def predict(
     except HTTPException:
         raise
     except Exception as e:
-        # Capturar cualquier otro error no manejado
         import traceback
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
@@ -303,7 +295,3 @@ async def list_models():
 async def health_check():
     """Endpoint de verificación de salud para el microservicio."""
     return {"status": "Ok"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # El puerto 8001 coincide con el microservicio de RF en el API Gateway
