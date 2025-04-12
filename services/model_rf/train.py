@@ -1,20 +1,36 @@
 from .rf_model2 import TimeSeriesRandomForestModel
 
+
 def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_model_path=None):
     """
-    Entrenar un modelo de Random Forest para datos de series temporales
+    Trains a time series forecasting model using a Random Forest algorithm.
 
-    Parámetros:
-    - data: DataFrame con los datos
-    - n_lags: Número de características de rezago a crear
-    - target_col: Nombre de la columna objetivo para la predicción (el valor predeterminado es 'Close')
-    - train_size: Proporción del conjunto de datos a usar para el entrenamiento (el valor predeterminado es 0.8)
-    - save_model_path: Ruta para guardar el modelo entrenado (el valor predeterminado es None, no se guarda)
+    This function prepares and processes the time series data, splits it into training
+    and testing sets, scales the features and target variable, optimizes hyperparameters,
+    evaluates the model on the test data, and optionally saves the trained model if a
+    file path is provided.
 
-    Devuelve:
-    - Modelo entrenado con sus métricas de rendimiento
+    Args:
+        data: pandas.DataFrame
+            The input time series data containing the features and target column.
+        n_lags: int, optional
+            The number of previous time steps to use as features for the target variable.
+            Defaults to 10.
+        target_col: str, optional
+            The name of the column in the dataset representing the target variable.
+            Defaults to 'Close'.
+        train_size: float, optional
+            The proportion of the data to use for training the model. The remaining data
+            will be used for testing. Must be a value between 0 and 1. Defaults to 0.8.
+        save_model_path: str, optional
+            The file path to save the trained model. If None, the model will not be saved.
+            Defaults to None.
+
+    Returns:
+        TimeSeriesRandomForestModel
+            The trained time series Random Forest model.
     """
-    
+
     from utils.preprocessing import scale_data
 
     model = TimeSeriesRandomForestModel(n_lags=n_lags)
@@ -39,7 +55,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     # Guardar los nombres de las características antes de escalar
     feature_names = X_train.columns.tolist()
     print(f"Feature names: {feature_names}")
-    
+
     # Escalar los datos
     X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler = scale_data(
         X_train, X_test, y_train, y_test
@@ -65,5 +81,5 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     if save_model_path is not None:
         model.save_model(save_model_path)
         print(f"Model saved to {save_model_path}")
-    
+
     return model

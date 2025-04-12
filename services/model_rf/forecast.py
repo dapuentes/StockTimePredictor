@@ -1,17 +1,30 @@
 def forecast_future_prices(model, data, forecast_horizon=10, target_col='Close'):
     """
-    Pronosticar precios futuros utilizando el modelo entrenado
+    Forecast future prices based on the given model and data.
 
-    Parámetros:
-    - model: Modelo entrenado
-    - data: DataFrame con los datos más recientes
-    - forecast_horizon: Horizonte de pronóstico en días (el valor predeterminado es 10)
-    - target_col: Nombre de la columna objetivo para la predicción (el valor predeterminado es 'Close')
+    This function performs a future price prediction for a specified number of
+    days using the input model. It processes the data, scales features if
+    necessary, utilizes the model's prediction capabilities, and optionally
+    scales results back to their original scale. Additionally, it prints the
+    forecasted prices and generates a plot for visualization.
 
-    Devuelve:
-    - Array de precios futuros pronosticados
+    Args:
+        model: A predictive model object. This object should have the methods
+            `prepare_data`, `predict_future`, and `plot_forecast`. It may also
+            include optional scalers, `feature_scaler` and `target_scaler`, used
+            for preprocessing input features and postprocessing predicted values.
+        data: A DataFrame that contains historical data used for training and
+            generating future predictions.
+        forecast_horizon: int, optional. The number of days to forecast into
+            the future. Defaults to 10.
+        target_col: str, optional. The name of the column in the data which
+            serves as the target variable for prediction. Defaults to 'Close'.
+
+    Returns:
+        list: A list of forecasted future prices corresponding to the next
+            `forecast_horizon` days.
     """
-    
+
     # Preparar los datos más recientes
     processed_data = model.prepare_data(data, target_col=target_col)
 
