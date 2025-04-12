@@ -6,15 +6,23 @@ from typing import Union, Tuple
 
 def add_lags(df, target_col='Close', n_lags=30):
     """
-    Adds lag features to the dataset.
-    
-    Parameters:
-    - df: DataFrame containing the data.
-    - target_col: The column for which lags will be created.
-    - n_lags: Number of lag features to create.
-    
+    Adds lagged versions of a target column to a DataFrame. This function takes a DataFrame, a target
+    column name, and the number of lags to create lagged values for the target column, appending them
+    as new columns to the DataFrame. It returns a DataFrame without any rows containing NaN values
+    resulting from the lag operation. An exception is raised in case of an error during execution.
+
+    Args:
+        df (pandas.DataFrame): The input DataFrame containing the data.
+        target_col (str): The name of the target column to create lags for. Default is 'Close'.
+        n_lags (int): The number of lagged versions of the target column to create. Default is 30.
+
     Returns:
-    - DataFrame with lag features added.
+        pandas.DataFrame: A new DataFrame containing the original data and the lagged columns, with
+        rows containing NaN values removed.
+
+    Raises:
+        Exception: If there is an error during the operation, the exception is raised with a
+        descriptive message.
     """
     try:
         df_copy = df.copy()
@@ -27,13 +35,31 @@ def add_lags(df, target_col='Close', n_lags=30):
 
 def add_technical_indicators(df):
     """
-    Add technical indicators to the DataFrame.
-    
-    Parameters:
-    - df: Input DataFrame
-    
-    Returns:
-    - DataFrame with added technical indicators
+        Adds various technical indicators and feature engineering to a dataframe.
+
+        This function calculates multiple technical indicators including moving averages,
+        Relative Strength Index (RSI), Bollinger Bands, Moving Average Convergence Divergence (MACD),
+        and other features relevant for technical analysis in trading. It also adds additional
+        features derived from volatility, volume, and price-to-multiple moving average ratios.
+        These indicators are appended as new columns to the input dataframe.
+
+        Parameters:
+        df : pandas.DataFrame
+            The input dataframe containing historical price data. The dataframe must include
+            at least the 'Close' column. For volume-related features, the 'Volume' column is
+            also required. Additional features such as trend calculations need a 'GreenDay'
+            column to be present.
+
+        Returns:
+        pandas.DataFrame
+            A dataframe with the same original columns plus additional columns containing
+            technical indicators and engineered features.
+
+        Raises:
+        Exception
+            If any error occurs during the computation of technical indicators or feature
+            engineering, an exception will be raised and details will be logged with the
+            error message.
     """
     try:
         # Moving averages
@@ -82,13 +108,28 @@ def add_technical_indicators(df):
 
 def add_seasonal_features(df):
     """
-    Add seasonal features to the DataFrame.
-    
-    Parameters:
-    - df: Input DataFrame
-    
-    Returns:
-    - DataFrame with added seasonal features
+        Adds seasonal features such as day of the week, month, quarter, and one-hot
+        encoded representations of these features to the given DataFrame. The
+        function ensures that the DataFrame index is a DatetimeIndex before
+        extracting features. Day_of_week and month are one-hot coded for more
+        granular analysis.
+
+        Parameters:
+        df: pd.DataFrame
+            Input DataFrame with a DatetimeIndex or an index convertible to
+            DatetimeIndex.
+
+        Returns:
+        pd.DataFrame
+            The updated DataFrame containing the original data along with added
+            seasonal features such as day_of_week, month, quarter, and one-hot
+            encoded columns.
+
+        Raises:
+        Exception
+            If an error occurs during processing while ensuring index format or
+            adding features, an exception will be raised with additional logging
+            for debugging.
     """
     try:
         # Ensure index is datetime
@@ -113,14 +154,30 @@ def add_seasonal_features(df):
 
 def feature_engineering(data, custom_horizons=None, incluide_seasonal=False):
     """
-    Comprehensive feature engineering function.
-    
+    Perform feature engineering on financial time-series data.
+
+    This function generates a set of predictive features from the provided data,
+    based on rolling averages, trends, and additional techniques such as lagged
+    values and technical indicators. Optionally, seasonal features can also be
+    added. It validates input data for required columns and utilizes horizon
+    values for calculating derived features. Missing data is handled by dropping
+    rows with NaN values after feature calculation.
+
     Parameters:
-    - data: Input DataFrame
-    - custom_horizons: Optional list of custom horizons to use
-    
+        data (pandas.DataFrame): The input time-series data. Must include the 'Close'
+           column, and optionally 'GreenDay' for trend calculations.
+        custom_horizons (list[int], optional): Custom time horizons for feature
+           calculation. Defaults to `[2, 5, 60, 250]` if not provided.
+        incluide_seasonal (bool): Flag to indicate whether seasonal features should
+           be added to the data. Defaults to `False`.
+
     Returns:
-    - DataFrame with engineered features
+        pandas.DataFrame: A new DataFrame containing the original features along
+           with newly generated features.
+
+    Raises:
+        ValueError: If one or more required columns are missing from the input data.
+        Exception: For any other errors encountered during feature engineering.
     """
     try:
         # Use custom horizons if provided, otherwise use default
@@ -165,18 +222,40 @@ def feature_engineering(data, custom_horizons=None, incluide_seasonal=False):
 
 def scale_data(X_train, X_test, y_train, y_test, feature_scaler=None, target_scaler=None):
     """
-    Scale features and target variables.
-    
-    Parameters:
-    - X_train: Training features
-    - X_test: Test features
-    - y_train: Training target
-    - y_test: Test target
-    - feature_scaler: Optional pre-fitted feature scaler
-    - target_scaler: Optional pre-fitted target scaler
-    
-    Returns:
-    - Scaled training and test data, along with scalers
+        Scales training and testing data using provided or default scalers.
+
+        This function applies scaling to both the feature and target datasets for
+        training and testing. By default, it uses MinMaxScaler unless other scalers
+        are provided. The feature and target scalers are applied separately.
+
+        Args:
+            X_train: array-like of shape (n_samples, n_features)
+                Training feature data to be scaled.
+            X_test: array-like of shape (n_samples, n_features)
+                Testing feature data to be scaled.
+            y_train: array-like of shape (n_samples, n_targets) or (n_samples,)
+                Training target data to be scaled.
+            y_test: array-like of shape (n_samples, n_targets) or (n_samples,)
+                Testing target data to be scaled.
+            feature_scaler: object implementing the scikit-learn scaler API, optional
+                A scaler instance to be used for feature scaling. If None,
+                MinMaxScaler will be used.
+            target_scaler: object implementing the scikit-learn scaler API, optional
+                A scaler instance to be used for target scaling. If None,
+                MinMaxScaler will be used.
+
+        Returns:
+            tuple
+                A tuple containing scaled feature and target datasets for training
+                and testing, followed by the feature_scaler and target_scaler.
+                The format of the tuple is as follows:
+                (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
+                feature_scaler, target_scaler)
+
+        Raises:
+            Exception:
+                Raises an exception in case of any errors during the scaling
+                process, providing the error details.
     """
     try:
         # Use RobustScaler to handle outliers
@@ -205,16 +284,24 @@ def split_data(data: pd.DataFrame,
                shuffle: bool = False, 
                random_state: int = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """
-    Split data into training and testing sets with enhanced flexibility.
-    
-    Args:
-        data (DataFrame): Data to split.
-        train_size (float): Proportion of data to use for training (0.0 to 1.0).
-        shuffle (bool): Whether to shuffle the data before splitting.
-        random_state (int): Seed for random shuffling for reproducibility.
+    Splits a pandas DataFrame into training and testing datasets, separating features from the target column.
+
+    This function takes in a pandas DataFrame and splits it into training and testing sets based on a
+    specified split ratio. It ensures the target variable ('Close' column) is separated from the feature
+    columns. Optionally, the data can be shuffled before splitting. The function also preserves the
+    original data by working on a copy.
+
+    Arguments:
+        data (pd.DataFrame): Input DataFrame containing both features and a target 'Close' column.
+        train_size (float, optional): Proportion of the data to be used for training. Must be a value
+            between 0 and 1. Defaults to 0.8.
+        shuffle (bool, optional): Whether to shuffle the DataFrame before splitting. Defaults to False.
+        random_state (int, optional): Seed for the random number generator used when shuffle is True.
+            Ensures reproducibility. Defaults to None.
 
     Returns:
-        tuple: Training and testing sets for X and y.
+        Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]: A tuple containing the training features,
+            testing features, training target series, and testing target series, respectively.
     """
     try:
         # Validate input
@@ -256,15 +343,33 @@ def create_sequences(X: Union[np.ndarray, pd.DataFrame],
                      y: Union[np.ndarray, pd.Series], 
                      time_steps: int = 10) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Transform data into sequences suitable for LSTM models.
-    
+    Create sequences of data for time series processing.
+
+    This function takes input features (X) and corresponding targets/labels
+    (y), and generates sequences based on a given number of time_steps. Each
+    sequence in X_seq corresponds to `time_steps` consecutive entries in X,
+    and the corresponding value in y_seq is the target after the
+    time_steps.
+
     Parameters:
-    X (array-like): Features
-    y (array-like): Target
-    time_steps (int): Number of time steps in each sequence
-    
+        X: Union[np.ndarray, pd.DataFrame]
+            Input feature data. Must be convertible to a numpy array.
+        y: Union[np.ndarray, pd.Series]
+            Corresponding target values. Must be convertible to a numpy array.
+        time_steps: int
+            Number of consecutive entries to form a single sequence.
+
     Returns:
-    X_seq, y_seq: Data transformed into sequences
+        Tuple[np.ndarray, np.ndarray]
+            A tuple of two numpy arrays - X_seq and y_seq:
+            - X_seq contains sequences of shape (len(X) - time_steps, time_steps, features).
+            - y_seq contains the corresponding targets of shape (len(X) - time_steps,).
+
+    Raises:
+        ValueError
+            If the length of X is less than or equal to the specified time_steps.
+        Exception
+            For other unexpected errors encountered during the process.
     """
     try:
         # Convert to numpy arrays if not already
