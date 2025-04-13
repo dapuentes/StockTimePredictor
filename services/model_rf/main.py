@@ -4,7 +4,6 @@ import os
 import glob
 from datetime import datetime, timedelta
 
-# Importar módulos personalizados
 from services.model_rf.rf_model2 import TimeSeriesRandomForestModel
 from services.model_rf.train import train_ts_model
 from services.model_rf.forecast import forecast_future_prices
@@ -189,7 +188,7 @@ async def read_root():
         dict: A dictionary containing a single key-value pair with the message.
 
     """
-    return {"message": "Random Forest Time Series Model Service"}
+    return {"message": "Random Forest Time Series Model Service is running!"}
 
 
 @app.post("/train")

@@ -32,4 +32,3 @@ def evaluate_regression(y_true, y_pred):
         "MAE": mae,
         "MAPE": mape
     }
-# falta definir calculate_metrics para Sequential y LSTM
