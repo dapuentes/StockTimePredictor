@@ -1,0 +1,9 @@
+# Librerias para el Dockerfile
+fastapi
+uvicorn
+pandas
+numpy
+scikit-learn
+yfinance
+tensorflow
+keras
