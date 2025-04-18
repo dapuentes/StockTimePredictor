@@ -6,4 +6,4 @@ numpy
 scikit-learn
 yfinance
 tensorflow
-keras
+matplotlib

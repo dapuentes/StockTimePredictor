@@ -1,10 +1,10 @@
 from .lstm_model import TimeSeriesLSTMModel
 
+
 def train_lstm_model(
         data, n_lags=10, target_col='Close', train_size=0.8, validation_size=0.2,
         batch_size=32, epochs=100, save_model_path=None
 ):
-
     from utils.preprocessing import scale_data
 
     # Inicializar el modelo LSTM
@@ -43,7 +43,8 @@ def train_lstm_model(
     model.target_scaler = target_scaler
 
     # Dividir los datos de entrenamiento en conjuntos de entrenamiento y validación
-    validation_size = int(len(X_train_scaled) * (1 - validation_size)) # Es 1 - validation_size porque validation_size es el porcentaje de datos de validación
+    validation_size = int(len(X_train_scaled) * (
+            1 - validation_size))  # Es 1 - validation_size porque validation_size es el porcentaje de datos de validación
     X_val = X_train_scaled[validation_size:]
     y_val = y_train_scaled[validation_size:]
     X_train_final = X_train_scaled[:validation_size]
@@ -61,19 +62,29 @@ def train_lstm_model(
         feature_names=feature_names
     )
 
-    print(f"Best hyperparameters: units={model.units}, layers={model.layers}, dropout={model.dropout}, learning_rate={model.learning_rate}")
+    print(f"Best hyperparameters: units={model.units}, learning_rate={model.learning_rate}")
+
+    # Crear secuencias para el entrenamiento LSTM
+    X_train_seq, y_train_seq = model.create_sequences(X_train_scaled, y_train_scaled)
+    X_val_seq, y_val_seq = model.create_sequences(X_val, y_val)
+
+    print(f"Sequenced train data shape: {X_train_seq.shape}")
+    print(f"Sequenced validation data shape: {X_val_seq.shape}")
 
     # Entrenando con el conjunto de datos usando los mejores hiperparámetros
     model.fit(
-        X_train_scaled, y_train_scaled,
+        X_train_seq, y_train_seq,
         batch_size=batch_size,
         epochs=epochs,
-        validation_data=validation_size,
-        verbose=1
+        validation_data=(X_val_seq, y_val_seq)
     )
 
+    # Crear secuencias para los datos de prueba
+    X_test_seq, y_test_seq = model.create_sequences(X_test_scaled, y_test_scaled)
+    print(f"Sequenced test data shape: {X_test_seq.shape}")
+
     # Evaluar el modelo
-    metrics = model.evaluate(X_test_scaled, y_test)
+    metrics = model.evaluate(X_test_seq, y_test_seq)
     print(f"Model metrics: {model.metrics}")
 
     if save_model_path is not None:
@@ -81,7 +92,3 @@ def train_lstm_model(
         print(f"Model saved to {save_model_path}")
 
     return model
-
-
-
-

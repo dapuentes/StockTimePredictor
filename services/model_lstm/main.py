@@ -66,7 +66,7 @@ def get_default_model_path(ticket):
         str: The complete file path to the default model file for the given
         ticket.
     """
-    return os.path.join(MODEL_DIR, f"lstm_model_{ticket}.h5")
+    return os.path.join(MODEL_DIR, f"lstm_model_{ticket}.keras")
 
 # Cargar el modelo preentrenado por si no se entrena uno nuevo
 def get_generic_model_path():
@@ -80,7 +80,7 @@ def get_generic_model_path():
     Returns:
         str: The complete file path to the pre-trained LSTM model.
     """
-    return os.path.join(MODEL_DIR, "lstm_model.h5")
+    return os.path.join(MODEL_DIR, "lstm_model.keras")
 
 # Cargar modelo por ticket
 def find_model_for_ticket(ticket):
@@ -108,7 +108,7 @@ def find_model_for_ticket(ticket):
         return generic_model_path
 
     # Busca cualquier modelo en el directorio de modelos como último recurso
-    avaliable_models = glob.glob(os.path.join(MODEL_DIR, "*.h5"))
+    avaliable_models = glob.glob(os.path.join(MODEL_DIR, "*.keras"))
     if avaliable_models:
         return avaliable_models[0]
     return None
@@ -398,7 +398,7 @@ async def list_models():
         an HTTPException with status code 500 is raised.
     """
     try:
-        models = glob.glob(os.path.join(MODEL_DIR, "*.h5"))
+        models = glob.glob(os.path.join(MODEL_DIR, "*.keras"))
         model_info = []
 
         for model_path in models:
