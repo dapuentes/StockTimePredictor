@@ -1,10 +1,59 @@
+
+'''
+# 📘 XGBoostModel (Regressor)
+_Machine learning regression model for time series forecasting using XGBoost._
+
+---
+
+## 🔍 Overview
+
+The `XGBoostModel` class encapsulates a robust regression workflow using `XGBRegressor`, tailored for time series prediction. It includes:
+
+- Lag-feature engineering
+- Feature scaling
+- Hyperparameter optimization
+- Evaluation metrics
+- Recursive multi-step forecasting
+- Visualization and model persistence
+
+---
+
+## 🧱 Class Architecture
+
+```plaintext
+        ┌──────────────┐
+        │ Raw TimeSeries│
+        └──────┬───────┘
+               ▼
+     ┌─────────────────────┐
+     │ prepare_data()      │ <- feature_engineering + add_lags
+     └─────────────────────┘
+               ▼
+     ┌─────────────────────┐
+     │ scale_data()        │ <- MinMax or Robust
+     └─────────────────────┘
+               ▼
+     ┌─────────────────────┐
+     │ fit() or optimize_hyperparameters() 
+     └─────────────────────┘
+               ▼
+     ┌─────────────┐
+     │ predict()   │
+     └─────────────┘
+               ▼
+     ┌─────────────────────┐
+     │ evaluate()          │ → MAE, RMSE, R², etc
+     └─────────────────────┘
+
+''' 
+
+
 from xgboost import XGBClassifier, XGBRegressor
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.preprocessing import LabelEncoder
 import joblib
 import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import joblib
 import numpy as np
 import os
 import json
@@ -397,6 +446,5 @@ def train_xgb_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mo
         print(f"Model saved to {save_model_path}")
     
     return model
-
 
 

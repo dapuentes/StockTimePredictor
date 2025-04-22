@@ -1,7 +1,81 @@
-# Predict entrega el grafico
-# forecast_future_price( modelo, datos, n_steps=1, variable objetivo= )
-# Implementar timeseriessplit para el modelo de xgboost
+'''
 
+This app.py file powers the RESTful API for interacting with the XGBoostModel. It supports endpoints for:
+
+Training a model (/train)
+
+Evaluating performance (/evaluate)
+
+Making future predictions (/predict)
+
+Listing available models (/models)
+
+The app uses FastAPI and integrates with utils/ and services/ modules.
+
+
+API Endpoints
+
+GET /
+
+Basic welcome message.
+
+GET /train
+
+Train a new XGBoost model on locally loaded stock data (default params). Saves model + metrics.
+
+Uses:
+
+load_data()
+
+feature_engineering()
+
+split_data()
+
+scale_data()
+
+XGBoostModel().fit()
+
+Output: {
+  "message": "Model trained and saved successfully.",
+  "evaluation_results": {"mse": ..., "mae": ...}
+}
+GET /predict
+
+Predict future values using latest available model.
+
+Query parameters:
+
+ticket: stock ticker
+
+forecast_horizon: number of days to forecast
+
+target_col: column name (usually 'Close')
+
+Returns JSON array of future values + model metadata used.
+
+GET /models
+
+List trained models in /models dir with metadata, sizes, paths.
+
+GET /evaluate
+
+Evaluates latest model on holdout test data with:
+
+Scaled metrics
+
+Inverse-transformed original-scale metrics
+
+Returns a snapshot:
+{
+  "evaluation_results_scaled": {...},
+  "evaluation_results_original": {...},
+  "sample_predictions": {
+    "predicted": [...],
+    "actual": [...]
+  }
+}
+
+'''
 from pathlib import Path
 import sys
 import os
@@ -56,7 +130,7 @@ loaded_models = {}
 
 def get_default_model_path(ticket):
     """Genera la ruta predeterminada para guardar un modelo entrenado"""
-    return os.path.join(MODEL_DIR, f"xgb_model_{ticket}.joblib")
+    return os.path.join(MODEL_DIR, f"xgb_model_{ticket}.joblib") # CAMBIAR
 
 def get_generic_model_path():
     """ Obtiene la ruta del modelo genérico entrenado previamente """
@@ -146,7 +220,6 @@ def train_model():
         # Asignar los escaladores al modelo
         model.feature_scaler = feature_scaler
         model.target_scaler = target_scaler
-        model.n_lags = 10 
 
         
         # Save model
@@ -407,7 +480,7 @@ def evaluate_model():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 #script to run the server
