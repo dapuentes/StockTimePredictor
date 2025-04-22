@@ -77,16 +77,50 @@ XGBoost
 
 Sequential Neural Network
 
-## 📸 Visualizations / Visualizaciones
-All models support:
 
-Forecast plots
+## Services
 
-Confidence intervals
+Adentro se encuentra toda la logica de los modelos propuestos en el proyecto, separados por carpetas dentro de se tiene la siguiente logica:
 
-Comparative performance
+- main.py o app.py: API correspondiente a cada modelo
+- forecast.py: archivo encargado de realizar las predicciones con la logica necesaria de cada modelo
+- X_model: Archivo contenedor de la clase con el modelo correspondiente y las funciones necesarias para ser llamadas en la API
 
-MAE / RMSE / MAPE metrics
+
+## Utils / Utilidades
+
+### evaluation:
+
+Adentro hay funciones que entregan metricas para calificar la eficiciencia de los modelos
+
+### import data:
+
+Funcion encargada de importar los datos como ticker, usa la API de Yahoo Finance.
+Usa el simbolo del stock, una fecha de inicio, una fecha de fin y te entrega un dataframe con la siguientes columnas
+Date  -   Open  -  High  -  Low  -  Close  -  Volume  -  GreenDay
+
+### preprocessing:
+
+Archivo con funciones para procesar el dataframe y preparalo para modelamiento:
+Trabajo de caracteristicas:
+- add_lags
+- add_technical_indicators
+- add_seasonal_features
+- feature_engineering
+  
+Preparamiento de datos:
+
+- scale_data
+- split_data
+- create_sequences
+
+### 📸 visualizations
+
+Archivo con las funciones encargadas de las visualizaciones usadas en el proyecto
+- plot_predictions: Plot true vs predicted values.
+- plot_forecast: Plot the historical data and the forecast.
+- plot_lstm_results: Plot LSTM model results
+- .
 
 ## 🧾 License / Licencia
 
