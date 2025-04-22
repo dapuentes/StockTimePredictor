@@ -95,8 +95,8 @@ Adentro hay funciones que entregan metricas para calificar la eficiciencia de lo
 
 ### import data:
 
-Funcion encargada de importar los datos como ticker, usa la API de Yahoo Finance.
-Usa el simbolo del stock, una fecha de inicio, una fecha de fin y te entrega un dataframe con la siguientes columnas
+Funcion encargada de importar los datos como ticker, usa la API de Yahoo Finance.  
+Usa el simbolo del stock, una fecha de inicio, una fecha de fin y te entrega un dataframe con la siguientes columnas  
 Date  -   Open  -  High  -  Low  -  Close  -  Volume  -  GreenDay
 
 ### preprocessing:
