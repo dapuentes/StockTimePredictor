@@ -48,7 +48,7 @@ git clone https://github.com/dapuentes/StockTimePredictor.git
 cd StockTimePredictor
 ```
 
-2. Create virtual environment / Crea un entorno virtual
+### 2. Create virtual environment / Crea un entorno virtual
 
 ```bash
 python -m venv venv
@@ -56,17 +56,17 @@ source venv/bin/activate    # on Linux/macOS
 venv\Scripts\activate       # on Windows
 ```
 
-3. Install dependencies / Instala las dependencias
+### 3. Install dependencies / Instala las dependencias
 ```bash
 pip install -r requirements.txt
 ```
 
-4.  Usage / Uso
+### 4.  Usage / Uso
 ```
 uvicorn api_gateway.main:app --reload
 ```
 
-📈 Models Included / Modelos Incluidos
+## 📈 Models Included / Modelos Incluidos
 LSTM (Long Short-Term Memory)
 
 Prophet (by Meta/Facebook)
@@ -77,7 +77,7 @@ XGBoost
 
 Sequential Neural Network
 
-📸 Visualizations / Visualizaciones
+## 📸 Visualizations / Visualizaciones
 All models support:
 
 Forecast plots
@@ -88,7 +88,7 @@ Comparative performance
 
 MAE / RMSE / MAPE metrics
 
-🧾 License / Licencia
+## 🧾 License / Licencia
 
 MIT License
 See LICENSE for details.
