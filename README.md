@@ -1,168 +1,169 @@
-# StockTimePredictor
+# 📊 StockTimePredictor
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Descripción General
-
-StockTimePredictor es un proyecto diseñado para pronosticar precios y tendencias del mercado de valores utilizando análisis de series temporales y diversos modelos de machine learning. Utiliza una arquitectura de microservicios orquestada por un API Gateway, permitiendo a los usuarios entrenar diferentes modelos y obtener predicciones para tickers de acciones específicos.
-
-El objetivo principal es proporcionar una plataforma flexible para experimentar y desplegar diferentes modelos de pronóstico como LSTM, Random Forest, XGBoost, Prophet y Redes Neuronales Secuenciales.
-
-## Arquitectura
-
-El proyecto sigue una arquitectura de microservicios:
-
-* **API Gateway (`api_gateway/`)**: Actúa como el único punto de entrada para todas las solicitudes. Enruta las peticiones de entrenamiento y predicción al microservicio del modelo apropiado.
-* **Servicios de Modelos (`services/`)**: Cada subdirectorio (`model_lstm`, `model_rf`, `model_xgb`, etc.) contiene un microservicio separado que implementa un modelo de pronóstico específico. Cada servicio típicamente incluye:
-    * `main.py` o `app.py`: La aplicación FastAPI para los endpoints de la API del servicio (entrenar, predecir).
-    * `*_model.py`: La clase que define la lógica del modelo, preprocesamiento, entrenamiento y funciones de predicción.
-    * `train.py`: Script que orquesta el proceso de entrenamiento del modelo.
-    * `forecast.py`: Script que maneja la lógica de predicción.
-    * `models/`: Directorio que almacena modelos serializados (`.joblib`, `.h5`) y metadatos (`.json`).
-    * `requirements.txt`: Dependencias específicas de ese servicio.
-* **Utilidades (`utils/`)**: Contiene funciones de ayuda compartidas para:
-    * Importación de Datos (`import_data.py`): Carga de datos de acciones usando `yfinance`.
-    * Preprocesamiento (`preprocessing.py`): Ingeniería de características (rezagos, indicadores técnicos, características estacionales), escalado, división y creación de secuencias.
-    * Evaluación (`evaluation.py`): Cálculo de métricas de regresión (MSE, RMSE, MAE, MAPE).
-    * Visualización (`visualizations.py`): Graficación de predicciones y pronósticos.
-* **Scripts de Entrenamiento (`training/scripts`)**: Scripts de ejemplo para iniciar el entrenamiento de modelos (ej., `train_rf.py`).
-
-## Estructura del Proyecto
-
-```
-StockTimePredictor/
-│
-├── requirements.txt           # Dependencias generales 
-│
-├── api_gateway/               # API Gateway (App FastAPI) 
-│   └── app.py
-│
-├── services/                  # Microservicios de Modelos
-│   ├── model_lstm/            # Servicio LSTM 
-│   │   ├── main.py
-│   │   ├── lstm_model.py
-│   │   ├── train.py
-│   │   ├── forecast.py
-│   │   ├── models/
-│   │   └── requirements.txt
-│   │
-│   ├── model_rf/              # Servicio Random Forest
-│   │   ├── main.py
-│   │   ├── rf_model2.py
-│   │   ├── train.py
-│   │   ├── forecast.py
-│   │   ├── models/
-│   │   └── requirements.txt
-│   │
-│   ├── model_xgb/             # Servicio XGBoost - Corre en el puerto 8003
-│   │   ├── main_xgb.py        
-│   │   ├── xgb_model.py
-│   │   ├── forecast.py
-│   │   ├── models/
-│   │   └── requirements.txt   
-│   │
-│   ├── model_prophet/         
-│   │
-│
-├── training/                  # Scripts y recursos de entrenamiento
-│   └── scripts/
-│       └── train_rf.py        # Script de ejemplo para entrenar RF
-│
-└── utils/                     # Funciones de utilidad compartidas
-    ├── __init__.py
-    ├── evaluation.py             
-    ├── import_data.py            
-    ├── preprocessing.py          
-    └── visualizations.py          
-
-```
-
+**StockTimePredictor** es una plataforma interactiva para el pronóstico de precios bursátiles utilizando análisis de series temporales y modelos de machine learning como LSTM, Random Forest, y XGBoost. Está compuesta por un backend modular con microservicios en Python y una interfaz web intuitiva construida en React.
 
 ---
 
-## 🚀 Getting Started / Primeros Pasos
+## 🧠 Características Principales
 
-### 1. Clone this repo / Clona el repositorio
+- Entrenamiento y despliegue de modelos ML para predicción financiera.
+- Arquitectura de microservicios orquestada por un API Gateway.
+- Interfaz gráfica (frontend) para configurar modelos y visualizar resultados.
+- Visualización de series temporales, métricas y detalles del modelo.
+
+---
+
+## 🏗️ Estructura del Proyecto
+
 ```bash
+StockTimePredictor/
+├── docker-compose.yml         # Orquestador Docker
+├── frontend/                  # Interfaz de usuario (React)
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   └── App.js
+├── backend/
+│   ├── api_gateway/           # Entrada única al backend (FastAPI)
+│   ├── services/              # Microservicios por modelo (LSTM, RF, XGB)
+│   ├── utils/                 # Funciones compartidas
+│   └── training/              # Scripts de entrenamiento
+```
 
+---
+
+## ⚙️ Tecnologías Utilizadas
+
+### Backend
+
+- Python 3.9+
+- FastAPI
+- Docker & Docker Compose
+- Modelos ML: LSTM, Random Forest, XGBoost (otros en desarrollo)
+
+### Frontend
+
+- React
+- Ant Design
+- Chart.js
+- Axios
+- @tanstack/react-query
+- Day.js
+
+---
+
+## 📈 Modelos Disponibles
+
+| Modelo | Estado |
+|--------|--------|
+| LSTM   | ✅ Implementado |
+| Random Forest | ✅ Implementado |
+| XGBoost | ✅ Implementado |
+| Prophet (Meta) | 🔜 Por implementar |
+| Red Neuronal Secuencial | 🔜 Por implementar |
+| Ensemble | 🔜 Por implementar |
+
+---
+
+## 📋 Requisitos
+
+### Generales
+
+- Git
+- Docker y Docker Compose
+
+### Backend
+
+- Python 3.9+
+- `pip`
+
+### Frontend
+
+- Node.js 16+
+- `npm` o `yarn`
+
+---
+
+## 🚀 Instalación y Ejecución
+
+### 1. Clonar el repositorio
+
+```bash
 git clone https://github.com/dapuentes/StockTimePredictor.git
 cd StockTimePredictor
 ```
 
-### 2. Create virtual environment / Crea un entorno virtual
+### 2. Iniciar el Backend (Docker Compose)
 
 ```bash
-python -m venv venv
-source venv/bin/activate    # on Linux/macOS
-venv\Scripts\activate       # on Windows
+docker-compose build
+docker-compose up -d
 ```
 
-### 3. Install dependencies / Instala las dependencias
+- API Gateway: `http://localhost:8000`
+- Los microservicios de modelos corren en puertos como `8001`, `8002`, etc., accesibles a través del gateway.
+
+### 3. Iniciar el Frontend
+
 ```bash
-pip install -r requirements.txt
+cd frontend
+npm install
+npm start
 ```
 
-### 4.  Usage / Uso
-```
-uvicorn api_gateway.main:app --reload
-```
+- Interfaz disponible en `http://localhost:3000`
 
-## 📈 Models Included / Modelos Incluidos
-LSTM (Long Short-Term Memory)
+⚠️ Asegúrate de que el backend esté ejecutándose antes de abrir el frontend.
 
-Prophet (by Meta/Facebook)
+---
 
-Random Forest
+## 🧪 Cómo Usar la App
 
-XGBoost
+1. **Seleccionar Configuración**
+   - Ticker (ej. AAPL, TSLA)
+   - Rango de fechas
+   - Modelo (RF, LSTM, XGBoost)
+   - Número de lags (días históricos)
 
-Sequential Neural Network
+2. **Entrenamiento**
+   - Clic en “Entrenar Modelo”
+   - Verás indicadores de carga y luego métricas detalladas
 
+3. **Pronóstico**
+   - Definir horizonte (días a futuro)
+   - Clic en “Generar Pronóstico”
+   - Visualizar resultados en el gráfico
 
-## Services
+4. **Explorar Resultados**
+   - Gráfico + predicciones
+   - Métricas
+   - Detalles del modelo
 
-Adentro se encuentra toda la logica de los modelos propuestos en el proyecto, separados por carpetas dentro de se tiene la siguiente logica:
+---
 
-- main.py o app.py: API correspondiente a cada modelo
-- forecast.py: archivo encargado de realizar las predicciones con la logica necesaria de cada modelo
-- X_model: Archivo contenedor de la clase con el modelo correspondiente y las funciones necesarias para ser llamadas en la API
+## 🌐 API - Comunicación Frontend <-> Backend
 
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/train/{modelType}` | POST | Envia parámetros del modelo. Usa `FormData`. |
+| `/predict/{modelType}` | GET | Devuelve predicciones en JSON. Parámetros vía query string. |
 
-## Utils / Utilidades
+Implementado en: `frontend/src/services/api.js`
 
-### evaluation:
+---
 
-Adentro hay funciones que entregan metricas para calificar la eficiciencia de los modelos
+## 🤝 Contribuciones
 
-### import data:
+¡Las contribuciones son bienvenidas!  
+Abre un pull request o issue para sugerencias, mejoras o reportes de errores.
 
-Funcion encargada de importar los datos como ticker, usa la API de Yahoo Finance.  
-Usa el simbolo del stock, una fecha de inicio, una fecha de fin y te entrega un dataframe con la siguientes columnas  
-Date  -   Open  -  High  -  Low  -  Close  -  Volume  -  GreenDay
+---
 
-### preprocessing:
+## 📄 Licencia
 
-Archivo con funciones para procesar el dataframe y preparalo para modelamiento:
-Trabajo de caracteristicas:
-- add_lags
-- add_technical_indicators
-- add_seasonal_features
-- feature_engineering
-  
-Preparamiento de datos:
+Este proyecto está bajo licencia [MIT](https://opensource.org/licenses/MIT).
 
-- scale_data
-- split_data
-- create_sequences
-
-### 📸 visualizations
-
-Archivo con las funciones encargadas de las visualizaciones usadas en el proyecto
-- plot_predictions: Plot true vs predicted values.
-- plot_forecast: Plot the historical data and the forecast.
-- plot_lstm_results: Plot LSTM model results
-- .
-
-## 🧾 License / Licencia
-
-MIT License
-See LICENSE for details.
+---
