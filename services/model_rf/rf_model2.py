@@ -324,7 +324,7 @@ class TimeSeriesRandomForestModel:
 
         plot_forecast(historical_data, forecast_values, target_col=target_col)
 
-    def save_model(self, model_path="models/model.joblib"):
+    def save_model(self, model_path="models/model.joblib", training_end_date=None):
         """
         Guardar el modelo entrenado en un archivo
 
@@ -343,7 +343,8 @@ class TimeSeriesRandomForestModel:
             'best_params': self.best_params_,
             'feature_importances': self.feature_importances_.tolist() if self.feature_importances_ is not None else None,
             'metrics': self.metrics,
-            'timestamp': pd.Timestamp.now().isoformat()
+            'timestamp': pd.Timestamp.now().isoformat(),
+            'training_end_date': training_end_date
         }
 
         # Generar la ruta para los metadatos, reemplazando la extensión

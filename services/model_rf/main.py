@@ -1,9 +1,14 @@
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
+import pandas as pd
+import numpy as np
+from typing import Optional
 import os
+from typing import Optional
 import glob
 from datetime import datetime, timedelta
 
+# Importar módulos personalizados
 from services.model_rf.rf_model2 import TimeSeriesRandomForestModel
 from services.model_rf.train import train_ts_model
 from services.model_rf.forecast import forecast_future_prices
@@ -39,11 +44,11 @@ class TrainRequest(BaseModel):
     """
     ticket: str = "NU"
     start_date: str = "2020-12-10"
-    end_date: str = datetime.now().strftime("%Y-%m-%d")
+    end_date: str = "2023-10-01"
     n_lags: int = 10
     target_col: str = "Close"
     train_size: float = 0.8
-    save_model_path: str = None
+    save_model_path: Optional[str] = None
 
 
 # Rutas para el almacenamiento de modelos
@@ -188,7 +193,7 @@ async def read_root():
         dict: A dictionary containing a single key-value pair with the message.
 
     """
-    return {"message": "Random Forest Time Series Model Service is running!"}
+    return {"message": "Random Forest Time Series Model Service"}
 
 
 @app.post("/train")
@@ -221,8 +226,16 @@ async def train_model(request: TrainRequest):
             # Si no se proporciona una ruta, usar la ruta predeterminada
             save_path = get_default_model_path(request.ticket)
 
+        # Validar número de dias para el uso de preprocessing
+        min_days = 260  # Porque en horizon se usan 250 días
+        if len(data) < min_days:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough historical data for training. Need at least {min_days} rows, but got {len(data)}."
+            )
+
         # Entrenar modelo
-        model = train_ts_model(
+        model, features_names = train_ts_model(
             data=data,
             n_lags=request.n_lags,
             target_col=request.target_col,
@@ -238,9 +251,13 @@ async def train_model(request: TrainRequest):
             "status": "success",
             "message": f"Model trained successfully for {request.ticket}",
             "metrics": model.metrics,
+            "features_names": features_names,
             "best_params": model.best_params_,
-            "model_path": save_path
+            "model_path": os.path.basename(save_path)
         }
+
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=f"Error in processing data: {str(ve)}")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error training model: {str(e)}")
@@ -250,7 +267,8 @@ async def train_model(request: TrainRequest):
 async def predict(
         ticket: str = Query("NU", description="Ticker of the stock to predict"),
         forecast_horizon: int = Query(10, description="Forecast horizon in days"),
-        target_col: str = Query("Close", description="Target column for prediction")
+        target_col: str = Query("Close", description="Target column for prediction"),
+        history_days: int = Query(365, description="Number of historical days to consider for prediction")
 ):
     """
     Handles HTTP GET requests to provide stock price predictions for a specified ticker,
@@ -298,14 +316,39 @@ async def predict(
                 raise ValueError("Model missing best_pipeline_ attribute")
 
         except Exception as model_error:
+            # Imprime el error real para depuración en el backend
+            print(f"ERROR loading model: {model_error}")
+            import traceback
+            traceback.print_exc()
             raise HTTPException(
                 status_code=500,
                 detail=f"Error loading model: {str(model_error)}"
             )
 
+        metadata_path = model_path.replace('.joblib', '_metadata.json')
+        training_end_date = None
+        if os.path.exists(metadata_path):
+            try:
+                import json
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                    training_end_date = metadata.get("training_end_date")
+            except Exception as e:
+                print(f"Warning: Could not load or read training_end_date from metadata {metadata_path}: {e}")
+
+        if training_end_date:
+            try:
+                end_date = datetime.strptime(training_end_date, "%Y-%m-%d")
+                print(f"Using training end date from metadata: {end_date.strftime('%Y-%m-%d')}")
+            except ValueError:
+                print(
+                    f"Warning: Invalid date format in metadata ('{training_end_date}'). Falling back to current date.")
+                end_date = datetime.now()  # Fallback
+        else:
+            print("Warning: training_end_date not found in metadata. Falling back to current date.")
+            end_date = datetime.now()  # Fallback si no hay fecha en metadatos
+
         try:
-            end_date = datetime.now()
-            # Usar un período más largo para asegurar suficientes datos
             start_date = end_date - timedelta(days=365 * 3)  # Tres años de datos históricos
             data = load_stock_data(ticket, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
@@ -342,17 +385,24 @@ async def predict(
         try:
             forecast = forecast_future_prices(
                 model=model,
-                data=data,
+                data=data.copy(),
                 forecast_horizon=forecast_horizon,
                 target_col=target_col
             )
 
             last_date = data.index[-1]
-            forecast_dates = [(last_date + timedelta(days=i + 1)).strftime("%Y-%m-%d")
-                              for i in range(forecast_horizon)]
+            forecast_dates = pd.date_range(
+                start=last_date + timedelta(days=1),
+                periods=forecast_horizon,
+                freq='B'  # 'B' para días hábiles del mercado
+            ).strftime('%Y-%m-%d').tolist()
 
             predictions = [{"date": date, "prediction": float(pred)}
                            for date, pred in zip(forecast_dates, forecast)]
+
+            historical_data_to_return = data.iloc[-history_days:]
+            historical_dates = historical_data_to_return.index.strftime('%Y-%m-%d').tolist()
+            historical_values = historical_data_to_return[target_col].tolist()
 
             model_info = "Modelo específico para el ticker" if ticket in model_path else "Modelo genérico"
 
@@ -361,6 +411,8 @@ async def predict(
                 "ticker": ticket,
                 "target_column": target_col,
                 "forecast_horizon": forecast_horizon,
+                "historical_dates": historical_dates,
+                "historical_values": historical_values,
                 "predictions": predictions,
                 "last_actual_date": last_date.strftime("%Y-%m-%d"),
                 "last_actual_value": float(data[target_col].iloc[-1]),

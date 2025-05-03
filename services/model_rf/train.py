@@ -37,8 +37,12 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
 
     # Preparar los datos
     processed_data = model.prepare_data(data, target_col=target_col)
+    print(len(data), len(processed_data))
     print(f"Processed data shape: {processed_data.shape}")
     print(processed_data.head())
+
+    if processed_data.empty:
+        raise ValueError("Processed data is empty. Check the input data and parameters.")
 
     train_size = int(len(processed_data) * train_size)
     train_data = processed_data.iloc[:train_size]
@@ -74,12 +78,25 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     )
     print(f"Best parameters: {model.best_params_}")
 
+    # Modelo de entrenamiento
+    y_train_pred_scaled = model.best_pipeline_.predict(X_train_scaled)
+
+    if model.target_scaler:
+        y_train_pred = model.target_scaler.inverse_transform(y_train_pred_scaled.reshape(-1, 1)).ravel()
+    else:
+        y_train_pred = y_train_pred_scaled
+
+    from utils.evaluation import evaluate_regression
+    train_metrics = evaluate_regression(y_train.flatten(), y_train_pred)
+    print(f"Train metrics: {train_metrics}")
+
     # Evaluar el modelo
     model.evaluate(X_test_scaled, y_test)
     print(f"Model metrics: {model.metrics}")
 
     if save_model_path is not None:
-        model.save_model(save_model_path)
+        training_end_date = data.index[-1].strftime("%Y-%m-%d")  # Ultima fecha de entrenamiento
+        model.save_model(save_model_path, training_end_date)
         print(f"Model saved to {save_model_path}")
 
-    return model
+    return model, feature_names

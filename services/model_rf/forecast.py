@@ -51,10 +51,4 @@ def forecast_future_prices(model, data, forecast_horizon=10, target_col='Close')
     for i in range(forecast_horizon):
         print(f"Day {i + 1}: {forecast[i]}")
 
-    model.plot_forecast(
-        data,
-        forecast,
-        target_col=target_col
-    )
-
     return forecast
