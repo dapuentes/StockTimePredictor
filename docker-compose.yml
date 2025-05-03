@@ -4,7 +4,7 @@ services:
   api-gateway:
     build:
       context: .
-      dockerfile: api_gateway/Dockerfile
+      dockerfile: Backend/api_gateway/Dockerfile
     ports:
       - "8000:8000" # Puerto del host al puerto del contenedor
     environment:
@@ -23,7 +23,7 @@ services:
   model-rf:
     build:
       context: .
-      dockerfile: services/model_rf/Dockerfile
+      dockerfile: Backend/services/model_rf/Dockerfile
     expose: # Red interna de Docker
       - "8001"
     volumes:
@@ -35,7 +35,7 @@ services:
   model-lstm:
     build:
       context: .
-      dockerfile: services/model_lstm/Dockerfile
+      dockerfile: Backend/services/model_lstm/Dockerfile
     expose:
       - "8002"
     volumes:
@@ -46,7 +46,7 @@ services:
   model-xgb:
     build:
       context: .
-      dockerfile: services/model_xgb/Dockerfile
+      dockerfile: Backend/services/model_xgb/Dockerfile
     expose:
       - "8003"
     volumes:
