@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, HTTPException, Query, Form, Path
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -20,10 +22,10 @@ app.add_middleware(
 
 # Diccionario para almacenar las rutas de los microservicios
 microservices = {
-    "rf": "http://localhost:8001",  # Microservicio de Random Forest
-    "model_lstm": "http://localhost:8002",  # Microservicio de LSTM
-    "model_xgboost": "http://localhost:8003",  # Microservicio de XGBoost
-    "model_ensemble": "http://localhost:8004",  # Microservicio de Ensemble
+    "rf": os.getenv("RF_SERVICE_URL", "http://localhost:8001"),  # Microservicio de Random Forest
+    "lstm": os.getenv("LSTM_SERVICE_URL", "http://localhost:8002"),  # Microservicio de LSTM
+    "xgboost": os.getenv("XGBOOST_SERVICE_URL", "http://localhost:8003"),  # Microservicio de XGBoost
+    "prophet": os.getenv("PROPHET_SERVICE_URL", "http://localhost:8004"),  # Microservicio de Prophet
     "data_import": "http://localhost:8005"  # Microservicio de Importación de Datos
 }
 

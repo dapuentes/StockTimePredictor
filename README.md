@@ -1,38 +1,78 @@
 # StockTimePredictor
-Repositorio para predecir acciones mediante análisis de series temporales y modelos de machine learning, generando pronósticos y tendencias del mercado
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Estructura:
+## Descripción General
+
+StockTimePredictor es un proyecto diseñado para pronosticar precios y tendencias del mercado de valores utilizando análisis de series temporales y diversos modelos de machine learning. Utiliza una arquitectura de microservicios orquestada por un API Gateway, permitiendo a los usuarios entrenar diferentes modelos y obtener predicciones para tickers de acciones específicos.
+
+El objetivo principal es proporcionar una plataforma flexible para experimentar y desplegar diferentes modelos de pronóstico como LSTM, Random Forest, XGBoost, Prophet y Redes Neuronales Secuenciales.
+
+## Arquitectura
+
+El proyecto sigue una arquitectura de microservicios:
+
+* **API Gateway (`api_gateway/`)**: Actúa como el único punto de entrada para todas las solicitudes. Enruta las peticiones de entrenamiento y predicción al microservicio del modelo apropiado.
+* **Servicios de Modelos (`services/`)**: Cada subdirectorio (`model_lstm`, `model_rf`, `model_xgb`, etc.) contiene un microservicio separado que implementa un modelo de pronóstico específico. Cada servicio típicamente incluye:
+    * `main.py` o `app.py`: La aplicación FastAPI para los endpoints de la API del servicio (entrenar, predecir).
+    * `*_model.py`: La clase que define la lógica del modelo, preprocesamiento, entrenamiento y funciones de predicción.
+    * `train.py`: Script que orquesta el proceso de entrenamiento del modelo.
+    * `forecast.py`: Script que maneja la lógica de predicción.
+    * `models/`: Directorio que almacena modelos serializados (`.joblib`, `.h5`) y metadatos (`.json`).
+    * `requirements.txt`: Dependencias específicas de ese servicio.
+* **Utilidades (`utils/`)**: Contiene funciones de ayuda compartidas para:
+    * Importación de Datos (`import_data.py`): Carga de datos de acciones usando `yfinance`.
+    * Preprocesamiento (`preprocessing.py`): Ingeniería de características (rezagos, indicadores técnicos, características estacionales), escalado, división y creación de secuencias.
+    * Evaluación (`evaluation.py`): Cálculo de métricas de regresión (MSE, RMSE, MAE, MAPE).
+    * Visualización (`visualizations.py`): Graficación de predicciones y pronósticos.
+* **Scripts de Entrenamiento (`training/scripts`)**: Scripts de ejemplo para iniciar el entrenamiento de modelos (ej., `train_rf.py`).
+
+## Estructura del Proyecto
+
 ```
 StockTimePredictor/
 │
+├── requirements.txt           # Dependencias generales 
 │
-├── requirements.txt               # Project dependencies
+├── api_gateway/               # API Gateway (App FastAPI) 
+│   └── app.py
 │
-├── __pycache__/                   # Python cache files
-├── api_gateway/                   # API gateway for model coordination
-├── services/                      # Model implementation services
-│   ├── __init__.py
-│   ├── model_lstm/                # LSTM model implementation
-│   │   └── lstm_model.ipynb
-│   ├── model_prophet/             # Prophet model implementation
-│   │   └── app.py
-│   │   └── models/
-│   │      └── prophet_model_metadata.json
-│   └── prophet_model.joblib
-│   ├── model_rf/                  # Random Forest model implementation
-│   ├── model_sequiential/         # Sequential neural network model implementation
-│   │   └── sequential_model.ipynb
-│   ├── model_xgb/                 # XGBoost model implementation
-│   │   ├── app.py
-│   │   └── models/
-│   │       └── xgb_model_metadata.json
-│   └── scripts/                   # Utility scripts
-└── utils/                         # Utility functions
+├── services/                  # Microservicios de Modelos
+│   ├── model_lstm/            # Servicio LSTM 
+│   │   ├── main.py
+│   │   ├── lstm_model.py
+│   │   ├── train.py
+│   │   ├── forecast.py
+│   │   ├── models/
+│   │   └── requirements.txt
+│   │
+│   ├── model_rf/              # Servicio Random Forest
+│   │   ├── main.py
+│   │   ├── rf_model2.py
+│   │   ├── train.py
+│   │   ├── forecast.py
+│   │   ├── models/
+│   │   └── requirements.txt
+│   │
+│   ├── model_xgb/             # Servicio XGBoost - Corre en el puerto 8003
+│   │   ├── main_xgb.py        
+│   │   ├── xgb_model.py
+│   │   ├── forecast.py
+│   │   ├── models/
+│   │   └── requirements.txt   
+│   │
+│   ├── model_prophet/         
+│   │
+│
+├── training/                  # Scripts y recursos de entrenamiento
+│   └── scripts/
+│       └── train_rf.py        # Script de ejemplo para entrenar RF
+│
+└── utils/                     # Funciones de utilidad compartidas
     ├── __init__.py
-    ├── evaluation.py              # Model evaluation utilities
-    ├── import_data.py             # Data import utilities
-    ├── preprocessing.py           # Data preprocessing utilities
-    └── visualizations.py          # Visualization utilities
+    ├── evaluation.py             
+    ├── import_data.py            
+    ├── preprocessing.py          
+    └── visualizations.py          
 
 ```
 

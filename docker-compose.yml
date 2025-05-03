@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api_gateway/Dockerfile
+    ports:
+      - "8000:8000" # Puerto del host al puerto del contenedor
+    environment:
+      # Inyecta las URLs como variables de entorno
+      RF_SERVICE_URL: http://model-rf:8001
+      LSTM_SERVICE_URL: http://model-lstm:8002
+      XGB_SERVICE_URL: http://model-xgb:8003
+      # PROPHET_SERVICE_URL: http://model-prophet:8004
+    depends_on:
+      - model-rf
+      - model-lstm
+      - model-xgb
+    networks:
+      - stockpredictor-net
+
+  model-rf:
+    build:
+      context: .
+      dockerfile: services/model_rf/Dockerfile
+    expose: # Red interna de Docker
+      - "8001"
+    volumes:
+      # Volumen nombrado para persistir los modelos de RF
+      - rf-models:/app/services/model_rf/models
+    networks:
+      - stockpredictor-net
+
+  model-lstm:
+    build:
+      context: .
+      dockerfile: services/model_lstm/Dockerfile
+    expose:
+      - "8002"
+    volumes:
+      - lstm-models:/app/services/model_lstm/models
+    networks:
+      - stockpredictor-net
+
+  model-xgb:
+    build:
+      context: .
+      dockerfile: services/model_xgb/Dockerfile
+    expose:
+      - "8003"
+    volumes:
+      - xgb-models:/app/services/model_xgb/models
+    networks:
+      - stockpredictor-net
+
+  # model-prophet: # Descomentar y configurar para Prophet
+  #   build:
+  #     context: .
+  #     dockerfile: services/model_prophet/Dockerfile
+  #   expose:
+  #     - "8004" # Ajustar puerto si es necesario
+  #   volumes:
+  #     - prophet-models:/app/services/model_prophet/models
+  #   networks:
+  #     - stockpredictor-net
+
+
+networks: # Red personalizada
+  stockpredictor-net:
+    driver: bridge
+
+volumes: # Volúmenes nombrados para persistencia
+  rf-models:
+  lstm-models:
+  xgb-models:
+  # prophet-models:
