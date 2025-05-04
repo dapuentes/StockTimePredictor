@@ -1,11 +1,33 @@
 import os
-
+from google.cloud import pubsub_v1
 from fastapi import FastAPI, HTTPException, Query, Form, Path
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 from datetime import datetime
 
-app = FastAPI(title="API Gateway", version="1.0.0")
+# Configuración de la variable de entorno GOOGLE_APPLICATION_CREDENTIALS
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID") # Cuando se cree el proyecto se reemplazará por el ID del proyecto
+PUB_SUB_TOPIC_ID = os.getenv("PUB_SUB_TOPIC_ID", "training-request") # Cuando se cree el proyecto se reemplazará por el ID del topic
+
+if GCP_PROJECT_ID is None:
+    print("ERROR: La variable de entorno GCP_PROJECT_ID no está configurada.")
+    raise ValueError("La variable de entorno GCP_PROJECT_ID no está configurada.")
+
+publisher = None
+topic_path = None
+
+if GCP_PROJECT_ID and PUB_SUB_TOPIC_ID:
+    try:
+        publisher = pubsub_v1.PublisherClient()
+        topic_path = publisher.topic_path(GCP_PROJECT_ID, PUB_SUB_TOPIC_ID)
+        print(f"Publicador Pub/Sub inicializado para el tema: {topic_path}")
+    except Exception as e:
+        print(f"ERROR: No se pudo inicializar el cliente Pub/Sub: {e}")
+        publisher = None # Deshabilita la publicación si falla la inicialización
+else:
+    print("ADVERTENCIA: GCP_PROJECT_ID o PUB_SUB_TOPIC_ID no configurados. La publicación Pub/Sub estará deshabilitada.")
+
+app = FastAPI(title="API Gateway", version="1.1.0")
 
 # Configuración de CORS para permitir solicitudes desde cualquier origen
 origins = [
@@ -43,93 +65,85 @@ async def read_root():
 
 
 @app.post("/train/{model_type}")
-async def train_model(
+async def request_training(
         model_type: str = Path(..., description="Tipo de modelo a entrenar (e.g., 'rf', 'lstm', 'xgboost')"),
         ticket: str = Form("NU"),
         start_date: str = Form("2020-12-10"),
         end_date: str = Form("2023-10-01"),
         n_lags: int = Form(10),
         target_col: str = Form("Close"),
-        train_size: float = Form(0.8),
-        save_model_path: str = Form(None)
+        train_size: float = Form(0.8)
 ):
     """
-    Handles the training of machine learning models by forwarding the request and parameters
-    to the appropriate microservice based on the specified model type. Supported model types
-    include 'rf', 'lstm', and 'xgboost'. The function validates the model type, constructs the
-    necessary payload, and communicates with the targeted microservice to initiate the
-    training process.
+    Handles a request to initiate a machine learning model training process. This endpoint
+    validates the provided model type, constructs a training request message, and publishes
+    it to a Pub/Sub topic for asynchronous processing. Returns confirmation details if the
+    request is successfully handled.
 
-    Args:
-        model_type: Type of the model to train (e.g., 'rf', 'lstm', 'xgboost'). This is a path
-            parameter and defines the service endpoint to forward the training request to.
-        ticket: Identifier or code for the dataset or data source to be used in training.
-            It defaults to 'NU' and is passed as part of the request body.
-        start_date: Start date for the training data, specified in 'YYYY-MM-DD' format. Defaults
-            to '2020-12-10'.
-        end_date: End date for the training data, specified in 'YYYY-MM-DD' format. Defaults to
-            today's date.
-        n_lags: Number of lagging or previous observations to consider in training. It is passed
-            as an integer.
-        target_col: The name of the target column in the dataset to perform predictions on. It
-            defaults to 'Close'.
-        train_size: Proportion of the dataset to be used for training. Specified as a float
-            value (e.g., 0.8 for 80%).
-        save_model_path: Path to save the trained model. If not specified, defaults to None,
-            indicating the model will not be saved directly.
+    Parameters:
+        model_type (str): The type of model to train (e.g., 'rf', 'lstm', 'xgboost').
+        ticket (str): The identifier associated with the training ticket. Defaults to 'NU'.
+        start_date (str): The start date for the training data window in YYYY-MM-DD format.
+            Defaults to '2020-12-10'.
+        end_date (str): The end date for the training data window in YYYY-MM-DD format.
+            Defaults to '2023-10-01'.
+        n_lags (int): The number of lagged values to use as input features for the model.
+            Defaults to 10.
+        target_col (str): The target column name in the dataset. Defaults to 'Close'.
+        train_size (float): The proportion of the dataset to include in the training split.
+            Defaults to 0.8.
 
     Returns:
-        dict: JSON response from the microservice being invoked for model training. Contains
-        details about the training process, such as success status or any diagnostic
-        information.
+        dict: A JSON-compatible dictionary that contains the status of the operation, a
+            message confirming submission of the training request, and the identifier of
+            the published message.
 
     Raises:
-        HTTPException: If the passed model type is not supported, an error is raised with a
-            status code 400.
-        HTTPException: If there is an issue in sending requests (e.g., server errors or
-            connectivity issues) to the targeted microservice, an error is raised with a
-            status code 500.
+        HTTPException: If the Pub/Sub service is not available, the model type is invalid,
+            or an error occurs while attempting to publish the message.
     """
 
-    if model_type.lower() not in microservices:
-        raise HTTPException(status_code=400, detail="Invalid model type. Supported types: rf, lstm, xgboost")
+    if not publisher or not topic_path:
+        raise HTTPException(status_code=503, detail="Pub/Sub service is not available")
 
-    # URL del microservicio correspondiente de entrenamiento
-    service_url = f"{microservices[model_type.lower()]}/train"
+    # Validar el tipo de modelo
+    supported_models = ["rf", "lstm", "xgboost", "prophet"]
+    if model_type.lower() not in supported_models:
+        raise HTTPException(status_code=400, detail=f"Invalid model type. Supported types: {', '.join(supported_models)}")
 
-    # Reenviar la petición con los parámetros necesarios
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                service_url,
-                json={
-                    "ticket": ticket,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "n_lags": n_lags,
-                    "target_col": target_col,
-                    "train_size": train_size,
-                    "save_model_path": save_model_path
-                },
-                timeout=300.0  # Timeout de 300 segundos
-            )
+    # Para publicar en Pub/Sub
+    try:
+        # Crear el mensaje de entrenamiento
+        message_data = {
+            "model_type": model_type,
+            "ticket": ticket,
+            "start_date": start_date,
+            "end_date": end_date,
+            "n_lags": n_lags,
+            "target_col": target_col,
+            "train_size": train_size,
+            "request_time": datetime.now().isoformat()
+        }
 
-            # Debugging: Imprimir el código de estado y el texto crudo de la respuesta
-            print(f"DEBUG Gateway: Status Code recibido de {service_url}: {response.status_code}")
-            print(f"DEBUG Gateway: Texto CRUDO recibido de {service_url}: ---START---\n{response.text}\n---END---")
+        # Convertir el mensaje a bytes
+        message_bytes = str(message_data).encode("utf-8")
 
-            response.raise_for_status()  # Lanza un error
+        # Publicar el mensaje en el tema de Pub/Sub
+        future = publisher.publish(topic_path, data=message_bytes)
+        message_id = future.result() # Esperar a que se publique el mensaje
 
-            json_response = response.json()
-            # Debugging: Imprimir la respuesta JSON
-            print(f"DEBUG Gateway: Respuesta JSON recibida de {service_url}: {json_response}")
-            return json_response
-        except Exception as e:
-            print(f"ERROR FATAL en Gateway procesando respuesta de {service_url}: {type(e).__name__} - {e}")
-            import traceback
-            traceback.print_exc()  # <--- Imprime el error detallado
-            raise HTTPException(status_code=500, detail=f"Error interno del Gateway...")
+        print(f"Mensaje de entrenamiento para {model_type}/{ticket} publicado con ID: {message_id}")
 
+        # Respuesta al frontend
+        return {
+            "status": "success",
+            "message": f"Training request for {model_type} model with ticket {ticket} has been submitted.",
+            "message_id": message_id
+        }
+
+    except Exception as e:
+        print(f"Error al publicar el mensaje: {e}")
+        raise HTTPException(status_code=500, detail="Error in sending request to Pub/Sub service")
 
 @app.get("/predict/{model_type}")
 async def predict(
@@ -173,10 +187,23 @@ async def predict(
 
     async with httpx.AsyncClient() as client:
         try:
+            print(f"Gateway sending request to {service_url} with params: {params}")
             response = await client.get(service_url, params=params, timeout=300.0)
             response.raise_for_status()  # Lanza un error
             return response.json()
+        except httpx.RequestError as exc:
+            print(f"Error in request to {exc.request.url!r}: {exc}")
+            raise HTTPException(status_code=503, detail=f"Error in request to microservice: {model_type}: {exc}")
+        except httpx.HTTPStatusError as exc:
+            print(f"Error response {exc.response.status_code} from {exc.request.url!r}: {exc.response.text}")
+            detail = f"Error {exc.response.status_code} from microservice {model_type}."
+            try:
+                detail += f" Detail: {exc.response.json().get('detail', exc.response.text)}"
+            except:
+                detail += f" Detail: {exc.response.text}"
+            raise HTTPException(status_code=exc.response.status_code, detail=detail)
         except Exception as e:
+            print(f"Unexpected error: {e}")
             raise HTTPException(status_code=500, detail=f"Error in sending request to microservice: {e}")
 
 
@@ -192,9 +219,3 @@ async def health_check():
     """
     return {"status": "Ok"}
 
-
-# Crear conexión al localhost
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)

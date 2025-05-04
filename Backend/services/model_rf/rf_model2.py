@@ -1,3 +1,6 @@
+import tempfile
+
+from google.cloud import storage
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.pipeline import Pipeline
@@ -359,17 +362,97 @@ class TimeSeriesRandomForestModel:
             json.dump({k: str(v) if not isinstance(v, (int, float)) else v
                        for k, v in metadata.items()}, f, indent=4)
 
-    @classmethod
-    def load_model(cls, model_path):
+    def save_model_local(self, local_model_path, local_metadata_path, training_end_date=None):
         """
-        Cargar un modelo previamente guardado
+        Guardar el modelo entrenado en un archivo local
 
         Parámetros:
-        - model_path: Ruta del archivo del modelo
-
-        Devuelve:
-        - Instancia del modelo cargado
+        - local_model_path: Ruta del archivo para guardar el modelo
+        - training_end_date: Fecha de finalización del entrenamiento
         """
-        return joblib.load(model_path)
+        print(f"Guardando pipeline en {local_model_path}")
+        joblib.dump(self.best_pipeline_, local_model_path)
+
+        metadata = {
+            'best_params': str(self.best_params_),
+            'feature_importances': self.feature_importances_.tolist() if self.feature_importances_ is not None else None,
+            'metrics': self.metrics,
+            'timestamp': pd.Timestamp.now().isoformat(),
+            'training_end_date': training_end_date,
+            'n_lags': self.n_lags,
+            'selected_features_indices': self.best_params_.get('selector__features_index',
+                                                               None) if self.best_params_ else None,
+            'all_feature_names': self.feature_names
+        }
+
+        print(f"Guardando metadata en {local_metadata_path}")
+
+        # Serializar el diccionario de metadatos
+        serializable_metadata = {}
+        for k, v in metadata.items():
+            if isinstance(v, (dict, list)):
+                try:
+                    json.dumps(v)
+                    serializable_metadata[k] = v
+                except TypeError:
+                    serializable_metadata[k] = str(v)
+            elif hasattr(v, 'tolist'):
+                serializable_metadata[k] = v.tolist()
+            else:
+                serializable_metadata[k] = v
+
+        with open(local_metadata_path, 'w') as f:
+            json.dump(serializable_metadata, f, indent=4)
+
+    @classmethod
+    def load_model_from_gcs(cls, gcs_model_path, gcs_metadata_path, bucket_name, project_id):
+        """Carga el modelo y metadatos desde GCS."""
+        print(f"Intentando cargar modelo desde gs://{bucket_name}/{gcs_model_path}")
+        try:
+            storage_client = storage.Client(project=project_id)
+            bucket = storage_client.bucket(bucket_name)
+
+            # Descargar modelo
+            model_blob = bucket.blob(gcs_model_path)
+            with tempfile.NamedTemporaryFile() as temp_model_file:
+                model_blob.download_to_filename(temp_model_file.name)
+                pipeline = joblib.load(temp_model_file.name)
+                print("Pipeline cargado desde GCS.")
+
+                # Descargar y cargar metadatos
+                metadata = {}
+                try:
+                    metadata_blob = bucket.blob(gcs_metadata_path)
+                    metadata_string = metadata_blob.download_as_text()
+                    metadata = json.loads(metadata_string)
+                    print("Metadatos cargados desde GCS.")
+                except Exception as meta_e:
+                    print(f"ADVERTENCIA: No se pudieron cargar los metadatos desde {gcs_metadata_path}: {meta_e}")
+
+                instance = cls(n_lags=metadata.get('n_lags', 10))  # Cargar n_lags de metadata si existe
+                instance.best_pipeline_ = pipeline
+                instance.best_params_ = metadata.get('best_params_', None)
+
+                if isinstance(instance.best_params_, str):
+                    try:
+                        # ¡Cuidado! eval() puede ser inseguro si el string no es confiable
+                        instance.best_params_ = eval(instance.best_params_)
+                    except:
+                        print("Advertencia: No se pudo parsear best_params_ desde string.")
+                        instance.best_params_ = None
+
+                instance.metrics = metadata.get('metrics', {})
+                instance.feature_importances_ = pipeline.named_steps[
+                    'rf'].feature_importances_ if 'rf' in pipeline.named_steps else None
+                instance.feature_names = metadata.get('all_feature_names', None)
+
+                print("Instancia del modelo reconstruida desde GCS.")
+                return instance
+
+        except Exception as e:
+            print(f"Error al cargar el modelo desde GCS: {e}")
+            return None
+
+
 
 

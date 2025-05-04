@@ -1,16 +1,30 @@
+import json
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import pandas as pd
+import numpy as np
 import os
 from typing import Optional
 import glob
 from datetime import datetime, timedelta
+import traceback
+
+from google.cloud import storage
 
 # Importar módulos personalizados
 from Backend.services.model_rf.rf_model2 import TimeSeriesRandomForestModel
-from Backend.services.model_rf.train import train_ts_model
 from Backend.services.model_rf.forecast import forecast_future_prices
 from Backend.utils.import_data import load_data
+
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+MODEL_BUCKET_NAME = os.getenv("MODEL_BUCKET_NAME")
+
+if not GCP_PROJECT_ID or not MODEL_BUCKET_NAME:
+    print("ERROR: Faltan variables de entorno GCP_PROJECT_ID o MODEL_BUCKET_NAME.")
+    storage_client = None
+else:
+    storage_client = storage.Client(project=GCP_PROJECT_ID)
 
 app = FastAPI(title="Random Forest Time Series Model Service", version="1.0.0")
 
@@ -46,33 +60,133 @@ class TrainRequest(BaseModel):
     n_lags: int = 10
     target_col: str = "Close"
     train_size: float = 0.8
-    save_model_path: Optional[str] = None
 
-
-# Rutas para el almacenamiento de modelos
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
-os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Diccionario global para almacenar los modelos entrenados
 loaded_models = {}
 
 
-def get_default_model_path(ticket):
+def get_gcs_model_paths(ticket, model_type="rf"):
     """
-    Generates the default model file path based on a given ticket identifier.
+    Generate Google Cloud Storage paths for model and metadata files.
 
-    The function constructs a path to the Random Forest model file using a
-    global model directory and a specific ticket identifier. The resulting
-    file path includes the ticket identifier as part of the filename.
+    This function constructs the file paths for a model file and its
+    corresponding metadata file, stored in a folder based on the given
+    model type. The filenames include the provided ticket and model
+    type as part of their naming convention.
 
-    Args:
-        ticket (str): A string identifier used to build the model file path.
+    Parameters:
+    ticket : str
+        Unique identifier used to generate the file names for the model
+        and metadata.
+    model_type : str, optional
+        Type of the model, such as "rf" (default is "rf").
 
     Returns:
-        str: The complete file path to the default model file for the given
-        ticket.
+    tuple
+        A tuple containing two elements:
+        - The Google Cloud Storage path for the model file as a string.
+        - The Google Cloud Storage path for the metadata file as a string.
     """
-    return os.path.join(MODEL_DIR, f"rf_model_{ticket}.joblib")
+    model_filename = f"{model_type}_model_{ticket}.joblib"
+    metadata_filename = f"{model_type}_model_{ticket}_metadata.json"
+    gcs_model_path = f"{model_type}_models/{model_filename}"
+    gcs_metadata_path = f"{model_type}_models/{metadata_filename}"
+    return gcs_model_path, gcs_metadata_path
+
+def find_model_paths_in_gcs(ticket, model_type="rf"):
+    """
+    Finds the paths to specific or generic machine learning model files stored in Google Cloud Storage (GCS).
+
+    This function searches for a model associated with a given ticket and model type in a GCS bucket.
+    It first attempts to locate a specific model for the ticket, and if unavailable, it searches for
+    a generic model. The function requires access to a valid GCS client and pre-defined bucket name
+    through properly configured environment variables.
+
+    Parameters:
+    ticket: str
+        Identifier used to search for the model associated with a specific entity or purpose.
+    model_type: str, optional
+        Type of the machine learning model. Defaults to "rf".
+
+    Returns:
+    tuple[str | None, str | None]
+        A tuple containing the paths to the model file and its metadata file in the GCS bucket. If no model is found,
+        both values will be None.
+    """
+    if not storage_client or not MODEL_BUCKET_NAME:
+        print("ERROR: Faltan variables de entorno GCP_PROJECT_ID o MODEL_BUCKET_NAME.")
+        return None, None
+
+    bucket = storage_client.bucket(MODEL_BUCKET_NAME)
+
+    # Buscar el modelo específico
+    specific_model_path, specific_metadata_path = get_gcs_model_paths(ticket, model_type)
+    model_blob = bucket.blob(specific_model_path)
+    if model_blob.exists():
+        print(f"Modelo específico encontrado en GCS: {specific_model_path}")
+        return specific_model_path, specific_metadata_path
+
+    # Buscar el modelo genérico
+    generic_model_path, generic_metadata_path = get_gcs_model_paths("generic", model_type)
+    model_blob = bucket.blob(generic_model_path)
+    if model_blob.exists():
+        print(f"Modelo genérico encontrado en GCS: {generic_model_path}")
+        return generic_model_path, generic_metadata_path
+
+    print(f"No se encontró ningún modelo {model_type} en GCS para {ticket} o genérico.")
+    return None, None
+
+def load_model_from_cache_or_gcs(gcs_model_path, gcs_metadata_path):
+    """
+    Loads a machine learning model from either a local cache or Google Cloud Storage (GCS).
+
+    This function attempts to load a model from a local in-memory cache if it has already
+    been loaded previously. If the model is not found in the cache, it proceeds to load the
+    model from Google Cloud Storage (GCS). This allows efficient reuse of models and reduces
+    load times by avoiding repeated downloads from GCS. Additionally, this function ensures
+    proper error handling in cases where paths are invalid, the storage service is not
+    configured, or the loading operation fails.
+
+    Parameters:
+        gcs_model_path (str): The path to the model file in Google Cloud Storage. This
+            must be a valid path, as it is used to identify and fetch the model.
+        gcs_metadata_path (str): The path to the metadata file associated with the model
+            in Google Cloud Storage.
+
+    Returns:
+        TimeSeriesRandomForestModel: An instance of the loaded machine learning model.
+
+    Raises:
+        HTTPException: Raised with a status code of 404 if the model path provided is invalid.
+        HTTPException: Raised with a status code of 503 if the storage service or bucket
+            name is not configured properly.
+        HTTPException: Raised with a status code of 500 if any other error occurs during
+            the model loading process.
+    """
+    cache_key = gcs_model_path
+    if cache_key in loaded_models:
+        print(f"Modelo cargado desde cache: {cache_key}")
+        return loaded_models[cache_key]
+
+    if not gcs_model_path:
+        raise HTTPException(status_code=404, detail="Ruta del modelo GCS no válida.")
+
+    if not storage_client or not MODEL_BUCKET_NAME:
+        raise HTTPException(status_code=503, detail="Servicio de almacenamiento no configurado.")
+
+    try:
+        model = TimeSeriesRandomForestModel.load_model_from_gcs(
+            gcs_model_path,
+            gcs_metadata_path,
+            MODEL_BUCKET_NAME,
+            GCP_PROJECT_ID
+        )
+        loaded_models[cache_key] = model  # Guardar en caché
+        return model
+    except Exception as e:
+        # El error ya se loguea en load_model_from_gcs
+        raise HTTPException(status_code=500, detail=f"Error al cargar el modelo desde GCS: {e}")
 
 
 def get_generic_model_path():
@@ -197,68 +311,24 @@ async def read_root():
 @app.post("/train")
 async def train_model(request: TrainRequest):
     """
-    Handles the training of a time-series forecasting model based on the provided
-    historical stock data and training configurations.
+    Handles the training process initiation for a machine learning model via an API endpoint.
 
-    Args:
-        request (TrainRequest): A request object containing the necessary
-            parameters for training the model, including stock ticket, date range,
-            desired lags, target column, training size, and save path for the model.
+    This endpoint is designed to trigger the model training asynchronously. However, it raises an
+    HTTP exception to indicate that training is initiated via a Pub/Sub mechanism rather than
+    directly triggered by this API endpoint.
 
-    Returns:
-        dict: A response dictionary containing the training status, success message,
-            computed metrics, best hyperparameters, and the path where the trained
-            model was saved.
+    Parameters:
+        request (TrainRequest): A request object containing the necessary information for model
+        training.
 
     Raises:
-        HTTPException: If any error occurs during the data loading, training, or
-            model saving process.
+        HTTPException: Always raised with a status code of 501 and a specific detail message to
+        specify that training is started via Pub/Sub, not directly through this API endpoint.
+
+    Returns:
+        None
     """
-    try:
-        # Cargar datos históricos
-        data = load_stock_data(request.ticket, request.start_date, request.end_date)
-
-        # Establecer ruta para guardar el modelo
-        save_path = request.save_model_path
-        if save_path is None or save_path == "":
-            # Si no se proporciona una ruta, usar la ruta predeterminada
-            save_path = get_default_model_path(request.ticket)
-
-        # Validar número de dias para el uso de preprocessing
-        min_days = 260  # Porque en horizon se usan 250 días
-        if len(data) < min_days:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Not enough historical data for training. Need at least {min_days} rows, but got {len(data)}."
-            )
-
-        # Entrenar modelo
-        model, features_names = train_ts_model(
-            data=data,
-            n_lags=request.n_lags,
-            target_col=request.target_col,
-            train_size=request.train_size,
-            save_model_path=save_path
-        )
-
-        # Agregar el modelo a la memoria caché
-        loaded_models[save_path] = model
-
-        # Devolver métricas y mejores parámetros
-        return {
-            "status": "success",
-            "message": f"Model trained successfully for {request.ticket}",
-            "metrics": model.metrics,
-            "features_names": features_names,
-            "best_params": model.best_params_,
-            "model_path": os.path.basename(save_path)
-        }
-
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=f"Error in processing data: {str(ve)}")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error training model: {str(e)}")
+    raise HTTPException(status_code=501, detail="Entrenamiento iniciado vía Pub/Sub, no directamente por API.")
 
 
 @app.get("/predict")
@@ -269,42 +339,51 @@ async def predict(
         history_days: int = Query(365, description="Number of historical days to consider for prediction")
 ):
     """
-    Handles HTTP GET requests to provide stock price predictions for a specified ticker,
-    forecast horizon, and target column. It leverages a pre-trained time series random forest model
-    to predict future stock prices.
+    Handles stock price predictions for a specified stock ticker using historical data and a pre-trained model.
 
-    Args:
-        ticket (str): Ticker of the stock to predict.
-        forecast_horizon (int): Forecast horizon in days.
-        target_col (str): Target column for prediction.
+    The function retrieves a machine learning model from Google Cloud Storage (GCS), ensures necessary attributes are available in the model,
+    and processes historical stock data to generate future price predictions. It accommodates forecasting for a user-defined horizon in trading days
+    while providing contextual metadata such as historical values and dates.
+
+    Arguments:
+        ticket (str): Stock ticker symbol to predict (e.g., "AAPL").
+        forecast_horizon (int): Number of business days for the prediction period.
+        target_col (str): Column in the stock data that serves as the prediction target (e.g., "Close").
+        history_days (int): Number of historical days to include in the returned historical data for context.
 
     Returns:
-        dict: A dictionary containing the prediction results, including:
-            - status: Status of the prediction.
-            - ticker: The input stock ticker.
-            - target_column: The input target column.
-            - forecast_horizon: The input forecast horizon.
-            - predictions: List of dictionaries containing predicted dates and their corresponding values.
-            - last_actual_date: Date of the last actual value.
-            - last_actual_value: Last actual value of the target column.
-            - model_used: Name of the model file used for prediction.
-            - model_info: Description of the model's usage, specific or generic for the ticker.
+        dict: Contains forecast results, historical data, and model information. Structure includes:
+              - status (str): Status of the operation ('success').
+              - ticker (str): Ticker for which the prediction was made.
+              - target_column (str): Target column used in the prediction.
+              - forecast_horizon (int): Number of days forecasted.
+              - historical_dates (List[str]): List of historical dates used for context.
+              - historical_values (List[float]): Historical values corresponding to `target_col`.
+              - predictions (List[dict]): List of forecasted dates and corresponding predicted values.
+              - last_actual_date (str): Date of the last available historical data.
+              - last_actual_value (float): Value of the target column on the last available historical date.
+              - model_used (str): Name of the model file used for forecasting.
+              - model_info (str): Information about whether the model was specific to the ticker or a generic one.
 
     Raises:
-        HTTPException: If an error occurs during model retrieval, loading, data fetching/preparation,
-            or forecast computation. Specific error details are included in the HTTP error response.
+        HTTPException: Various cases including:
+            - When no trained model is found.
+            - When the model lacks required attributes.
+            - When loading historical stock data fails or is incomplete.
+            - When the target column is missing from the data.
+            - When the historical data is insufficient for predictions.
+            - When errors occur during forecast generation.
+        Exception: For unexpected errors during execution.
     """
     try:
-        # Verificar que el ticket no esté vacío
-        model_path = find_model_for_ticket(ticket)
-        if model_path is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No trained model found for {ticket}. Train a model first.")
+        # Encontrar el modelo en GCS
+        gcs_model_path, gcs_metadata_path = find_model_paths_in_gcs(ticket, model_type="rf")
+        if not gcs_model_path:
+            raise HTTPException(status_code=404, detail=f"No se encontró modelo entrenado (específico o genérico) para {ticket} en GCS.")
 
         try:
-            model = TimeSeriesRandomForestModel.load_model(model_path)
-            print(f"Model loaded successfully from {model_path}")
+            model = load_model_from_cache_or_gcs(gcs_model_path, gcs_metadata_path)
+            print(f"Model loaded successfully from {gcs_model_path}")
             print(f"Model type: {type(model)}")
 
             # Verificar que el modelo tiene los atributos necesarios
@@ -323,31 +402,29 @@ async def predict(
                 detail=f"Error loading model: {str(model_error)}"
             )
 
-        metadata_path = model_path.replace('.joblib', '_metadata.json')
         training_end_date = None
-        if os.path.exists(metadata_path):
-            try:
-                import json
-                with open(metadata_path, 'r') as f:
-                    metadata = json.load(f)
-                    training_end_date = metadata.get("training_end_date")
-            except Exception as e:
-                print(f"Warning: Could not load or read training_end_date from metadata {metadata_path}: {e}")
+        if hasattr(model, 'metadata') and model.metadata:
+            training_end_date = model.metadata.get("training_end_date")
+            print(f"Using training end date from metadata: {training_end_date}")
+        else:
+            print("Warning: Model metadata not found. Attempting to load from GCS.")
 
+        end_date = datetime.now()
         if training_end_date:
             try:
                 end_date = datetime.strptime(training_end_date, "%Y-%m-%d")
                 print(f"Using training end date from metadata: {end_date.strftime('%Y-%m-%d')}")
-            except ValueError:
+            except (ValueError, TypeError) as date_error:
                 print(
-                    f"Warning: Invalid date format in metadata ('{training_end_date}'). Falling back to current date.")
-                end_date = datetime.now()  # Fallback
-        else:
-            print("Warning: training_end_date not found in metadata. Falling back to current date.")
-            end_date = datetime.now()  # Fallback si no hay fecha en metadatos
+                    f"Warning: Invalid date format in metadata ('{training_end_date}'). Falling back to current date. Error: {date_error}")
+            else:
+                print(f"Warning: training_end_date not found in metadata. Falling back to current date.")
+
+        # Cargar datos históricos
 
         try:
             start_date = end_date - timedelta(days=365 * 3)  # Tres años de datos históricos
+            print(f"Loading data from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
             data = load_stock_data(ticket, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
             print(f"Data loaded: {len(data)} rows, columns: {data.columns.tolist()}")
@@ -381,42 +458,16 @@ async def predict(
             )
 
         try:
+            if not hasattr(model, 'feature_scaler') or not hasattr(model, 'target_scaler'):
+                print("Warning: Model missing feature_scaler or target_scaler attributes. Attempting to load from GCS.")
+                raise ValueError("Model missing feature_scaler or target_scaler attributes")
+
             forecast = forecast_future_prices(
                 model=model,
                 data=data.copy(),
                 forecast_horizon=forecast_horizon,
                 target_col=target_col
             )
-
-            last_date = data.index[-1]
-            forecast_dates = pd.date_range(
-                start=last_date + timedelta(days=1),
-                periods=forecast_horizon,
-                freq='B'  # 'B' para días hábiles del mercado
-            ).strftime('%Y-%m-%d').tolist()
-
-            predictions = [{"date": date, "prediction": float(pred)}
-                           for date, pred in zip(forecast_dates, forecast)]
-
-            historical_data_to_return = data.iloc[-history_days:]
-            historical_dates = historical_data_to_return.index.strftime('%Y-%m-%d').tolist()
-            historical_values = historical_data_to_return[target_col].tolist()
-
-            model_info = "Modelo específico para el ticker" if ticket in model_path else "Modelo genérico"
-
-            return {
-                "status": "success",
-                "ticker": ticket,
-                "target_column": target_col,
-                "forecast_horizon": forecast_horizon,
-                "historical_dates": historical_dates,
-                "historical_values": historical_values,
-                "predictions": predictions,
-                "last_actual_date": last_date.strftime("%Y-%m-%d"),
-                "last_actual_value": float(data[target_col].iloc[-1]),
-                "model_used": os.path.basename(model_path),
-                "model_info": model_info
-            }
 
         except Exception as forecast_error:
             import traceback
@@ -433,6 +484,37 @@ async def predict(
                     status_code=500,
                     detail=f"Error making prediction: {str(forecast_error)}"
                 )
+
+        last_date = data.index[-1]
+        forecast_dates = pd.date_range(
+            start=last_date + timedelta(days=1),
+            periods=forecast_horizon,
+            freq='B'  # 'B' para días hábiles del mercado
+        ).strftime('%Y-%m-%d').tolist()
+
+        predictions = [{"date": date, "prediction": float(pred)}
+                       for date, pred in zip(forecast_dates, forecast)]
+
+        historical_data_to_return = data.iloc[-history_days:]
+        historical_dates = historical_data_to_return.index.strftime('%Y-%m-%d').tolist()
+        historical_values = historical_data_to_return[target_col].tolist()
+
+        model_basename = os.path.basename(gcs_model_path)
+        model_info = "Modelo específico para el ticker" if ticket in gcs_model_path else "Modelo genérico"
+
+        return {
+            "status": "success",
+            "ticker": ticket,
+            "target_column": target_col,
+            "forecast_horizon": forecast_horizon,
+            "historical_dates": historical_dates,
+            "historical_values": historical_values,
+            "predictions": predictions,
+            "last_actual_date": last_date.strftime("%Y-%m-%d"),
+            "last_actual_value": float(data[target_col].iloc[-1]),
+            "model_used": model_basename,
+            "model_info": model_info
+        }
 
     except HTTPException:
         raise
@@ -457,33 +539,49 @@ async def list_models():
         HTTPException: If an error occurs while retrieving or processing the models,
         an HTTPException with status code 500 is raised.
     """
+    if not storage_client or not MODEL_BUCKET_NAME:
+        raise HTTPException(status_code=503, detail="Servicio de almacenamiento no configurado.")
+
     try:
-        models = glob.glob(os.path.join(MODEL_DIR, "rf_model_*.joblib"))
+        bucket = storage_client.bucket(MODEL_BUCKET_NAME)
+        prefix = "rf_models/"
+        blobs = bucket.list_blobs(prefix=prefix)
         model_info = []
 
-        for model_path in models:
-            model_name = os.path.basename(model_path)
-            metadata = model_path.replace(',joblib', "_metadata.json")
-            metadata = None
+        processed_models = set()  # Para evitar duplicados
 
-            if os.path.exists(metadata):
-                try:
-                    import json
-                    with open(metadata, 'r') as f:
-                        metadata = json.load(f)
-                except:
-                    metadata = {"error": "Cloud not load metadata"}
+        for blob in blobs:
+            if blob.name.endswith(".joblib"):
+                model_base_path = blob.name.replace(".joblib", "")
+                if model_base_path in processed_models:
+                    continue
 
-            model_info.append({
-                "name": model_name,
-                "path": model_path,
-                "metadata": metadata,
-                "size_mb": round(os.path.getsize(model_path) / (1024 * 1024), 2),  # Tamaño en MB
-            })
-            return {
-                "total_models": len(model_info),
-                "models": model_info
-            }
+                model_name = os.path.basename(blob.name)
+                metadata_path = model_base_path + "_metadata.json"
+                metadata_blob = bucket.blob(metadata_path)
+                metadata = None
+
+                if metadata_blob.exists():
+                    try:
+                        metadata = json.loads(metadata_blob.download_as_text())
+                    except Exception as e:
+                        print(f"Error loading metadata for {model_name}: {e}")
+                else:
+                    metadata = {"info: No metadata found"}
+
+                model_info.append({
+                    "name": model_name,
+                    "gcs_path": f"gs://{MODEL_BUCKET_NAME}/{blob.name}",
+                    "metadata": metadata,
+                    "size_mb": blob.size / (1024 * 1024),  # Convertir a MB
+                    "last_modified": blob.updated.isoformat() if blob.updated else None
+                })
+                processed_models.add(model_base_path)
+
+        return {
+            "total_models": len(model_info),
+            "models": model_info
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing models: {str(e)}")
@@ -502,9 +600,3 @@ async def health_check():
         dict: A dictionary containing the status message with an "Ok" value.
     """
     return {"status": "Ok"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # El puerto 8001 coincide con el microservicio de RF en el API Gateway
