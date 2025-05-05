@@ -1,8 +1,17 @@
-/* 1. Fondo general suave */
+body {
+  margin: 0;
+  background-color: #f5f7fa;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
 body {
     background-color: #f5f7fa;
   }
-
+  
   /* ------------------------ */
   /*   Layout Principal       */
   /* ------------------------ */
@@ -11,7 +20,7 @@ body {
     flex-direction: column;
     min-height: 100vh;
   }
-
+  
   .App-header {
     background-color: #1f2733;        /* color más suave que el #282c34 */
     padding: 12px 20px;               /* menos altura */
@@ -21,12 +30,12 @@ body {
     position: relative;
     font-size: 1.5rem;                /* tamaño del título reducido */
   }
-
+  
   .App-header h1 {
     margin: 0;
     font-size: inherit;
   }
-
+  
   .App-footer {
     text-align: center;
     padding: 15px;
@@ -35,7 +44,7 @@ body {
     font-size: 0.9em;
     border-top: 1px solid #e9ecef;
   }
-
+  
   /* ------------------------ */
   /*   Tarjetas (AntD .ant-card) */
   /* ------------------------ */
@@ -43,9 +52,9 @@ body {
   .ant-card {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05) !important;
     border-radius: 8px !important;
-    padding: 30px !important;
+    padding: 30px !important; 
   }
-
+  
   /* ------------------------ */
   /*   Formulario Configuración  */
   /* ------------------------ */
@@ -60,18 +69,18 @@ body {
     max-width: 450px;
     align-self: flex-start;
   }
-
+  
   /* Más separación interna entre cada Form.Item */
   .config-panel .ant-form-item {
     margin-bottom: 16px;
   }
-
+  
   /* Etiquetas ligeramente más separadas del input */
   .config-panel .ant-form-item-label > label {
     margin-bottom: 4px;
     font-weight: 500;
   }
-
+  
   /* Botones: Entrenar primario, Pronosticar secundario */
   .config-panel .ant-btn-primary {
     width: 100%;
@@ -80,7 +89,7 @@ body {
   .config-panel .ant-btn-default {
     width: 100%;
   }
-
+  
   /* ------------------------ */
   /*   Resultados & Tabs       */
   /* ------------------------ */
@@ -92,33 +101,33 @@ body {
     flex: 2;
     min-width: 400px;
   }
-
+  
   /* Separación extra bajo el título de resultados */
   .results-section h3 {
     margin-bottom: 16px;
     color: #495057;
   }
-
+  
   /* Pestañas: resaltar la activa */
   .ant-tabs-tab-active .ant-tabs-tab-btn {
     font-weight: 600;
     color: #1890ff !important;
   }
-
+  
   /* ------------------------ */
   /*   Gráficos               */
   /* ------------------------ */
   /* Limitar ancho y centrar */
-  .graph-container {
+  .graph-container {        
     max-width: 800px;
     margin: 0 auto;
   }
-
+  
   /* Ejes y leyenda ligeramente más grandes */
   .chartjs-render-monitor {
     font-size: 13px !important;
   }
-
+  
   /* ------------------------ */
   /*   Métricas               */
   /* ------------------------ */
@@ -128,7 +137,7 @@ body {
     border-radius: 8px;
     border: 1px solid #ced4da;
   }
-
+  
   /* ------------------------ */
   /*   Responsive             */
   /* ------------------------ */
@@ -150,3 +159,4 @@ body {
       padding: 20px !important;
     }
   }
+  

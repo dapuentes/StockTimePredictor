@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import dayjs from 'dayjs';
-import { Layout, Row, Col, Card, Spin, Alert, Tabs, message, Button, Switch, ConfigProvider, theme as antdTheme, Descriptions  } from 'antd';
+import { Layout, Row, Col, Card, Spin, Alert, Tabs, message, Button, Switch, ConfigProvider, theme as antdTheme, Modal  } from 'antd';
 import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import Papa from 'papaparse';
 import ConfigurationPanel from './components/ConfigurationPanel';
@@ -157,16 +157,25 @@ function App() {
     // El useCallback asegura que la función no se vuelva a crear en cada renderizado, lo que mejora el rendimiento
     const handleTrain = useCallback(async (modelType, currentConfig) => {
         if (dateRangeWarning && dateRangeWarning.includes('podría ser muy corto')) {
-            if (!window.confirm(dateRangeWarning + "\n\nEl entrenamiento podría fallar. ¿Deseas continuar de todas formas?")) {
-                return; // El usuario canceló
-            }
-         }
-          if (dateRangeWarning && dateRangeWarning.includes('posterior a la fecha de inicio')) {
+            Modal.confirm({
+                title: 'Advertencia sobre Rango de Fechas',
+                content: dateRangeWarning + "\n\nEl entrenamiento podría fallar. ¿Deseas continuar de todas formas?",
+                okText: 'Continuar',
+                cancelText: 'Cancelar',
+                onOk: () => {
+                    // Solo si el usuario confirma, se ejecuta la mutación
+                    trainMutation.mutate({ modelType, config: currentConfig });
+                },
+                onCancel: () => {
+                    message.info('Entrenamiento cancelado por el usuario.');
+                }
+            });
+        } else if (dateRangeWarning && dateRangeWarning.includes('posterior a la fecha de inicio')) {
              message.error('Corrige las fechas antes de entrenar.');
-             return; // No continuar si las fechas son inválidas
-          }
-
-          trainMutation.mutate({ modelType, config: currentConfig }); // Llama a la mutación de entrenamiento
+        } else {
+            // Si no hay advertencias o errores de fecha, entrena directamente
+             trainMutation.mutate({ modelType, config: currentConfig });
+        }
       }, [trainMutation, dateRangeWarning]); // Dependencias para el useCallback
 
     // Maneja el pronóstico, similar a handleTrain pero para generar pronósticos
