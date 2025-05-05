@@ -3,9 +3,9 @@ import dayjs from 'dayjs';
 import { Layout, Row, Col, Card, Spin, Alert, Tabs, message, Button, Switch, ConfigProvider, theme as antdTheme, Descriptions  } from 'antd';
 import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import Papa from 'papaparse';
-import ConfigurationPanel from './components/ConfigurationPanel_AntD';
+import ConfigurationPanel from './components/ConfigurationPanel';
 import GraphDisplay from './components/GraphDisplay';
-import MetricsDisplay from './components/MetricsDisplay_AntD';
+import MetricsDisplay from './components/MetricsDisplay';
 import ModelComparisonTable from './components/ModelComparisonTable';
 import ModelDetailsDisplay from './components/ModelDetailsDisplay';
 import { useTrainModelMutation, useGenerateForecastMutation } from './hooks/useApiMutations'; // Ajusta el path
