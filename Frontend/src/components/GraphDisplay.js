@@ -1,5 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Line } from 'react-chartjs-2';
+import { Button } from 'antd';
+import { CameraOutlined, ReloadOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -37,6 +40,8 @@ ChartJS.register(
  * @return {JSX.Element} Returns a line chart JSX component displaying the combined historical and forecast data. If no data is available, a message is rendered prompting the user to generate a forecast.
  */
 function GraphDisplay({ historicalData, forecastData, ticker }) {
+    const chartRef = useRef(null);
+
     const hasHistoricalData = historicalData?.dates?.length > 0 && historicalData?.values?.length > 0;
 
     const hasForecastData = forecastData?.length > 0;
@@ -95,6 +100,23 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
         });
     }
 
+    const handleResetZoom = () => {
+        if (chartRef.current) {
+            chartRef.current.resetZoom();
+        }
+    }
+
+    const handleExportImage = () => {
+        if (chartRef.current) {
+            const imageBase64 = chartRef.current.toBase64Image();
+            const link = document.createElement('a');
+            link.href = imageBase64;
+            const filename = `grafico_${ticker}_${dayjs().format('YYYYMMDD_HHmmss')}.png`;
+            link.download = filename;
+            link.click();
+        }
+    };
+
     const options = {
         responsive: true,
         maintainAspectRatio: false,
@@ -140,8 +162,26 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
     // Contenedor con altura definida es importante
     return (
         <div style={{ height: '450px', width: '100%', position: 'relative' }}>
-            {/* El key ayuda a Chart.js a detectar cambios y re-renderizar completamente si cambia */}
-            <Line options={options} data={chartData} key={ticker + (historicalData?.dates?.length || 0) + (forecastData?.length || 0)} />
+            <Button
+                icon={<ReloadOutlined />}
+                onClick={handleResetZoom}
+                style={{ position: 'absolute', top: '20px', right: '10px', zIndex: 10 }}
+                size="small"
+                title="Restablecer Zoom"
+             />
+            <Button
+                icon={<CameraOutlined />}
+                onClick={handleExportImage}
+                style={{ position: 'absolute', top: '20px', right: '50px', zIndex: 10 }}
+                size="small"
+                title="Exportar Imagen"
+            />
+             <Line
+                ref={chartRef}
+                options={options}
+                data={chartData}
+                key={ticker + (historicalData?.dates?.length || 0) + (forecastData?.length || 0)}
+             />
         </div>
     );
 
