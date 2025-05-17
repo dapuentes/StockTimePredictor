@@ -3,11 +3,13 @@ import dayjs from 'dayjs';
 import { Layout, Row, Col, Card, Spin, Alert, Tabs, message, Button, Switch, ConfigProvider, theme as antdTheme, Modal  } from 'antd';
 import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import Papa from 'papaparse';
-import ConfigurationPanel from './components/ConfigurationPanel';
+import ResidualsDisplay from './components/ResidualsDisplay';
+import ConfigurationPanel from './components/ConfigurationPanel_AntD';
 import GraphDisplay from './components/GraphDisplay';
-import MetricsDisplay from './components/MetricsDisplay';
+import MetricsDisplay from './components/MetricsDisplay_AntD';
 import ModelComparisonTable from './components/ModelComparisonTable';
 import ModelDetailsDisplay from './components/ModelDetailsDisplay';
+import HelpModal from './components/HelpModal';
 import { useTrainModelMutation, useGenerateForecastMutation } from './hooks/useApiMutations'; // Ajusta el path
 import './App.css';
 
@@ -36,6 +38,8 @@ const min_calendar_days = 760; // Mínimo de días calendario para el rango de f
  * @return {React.Element} The App component responsible for managing states and rendering the application's main functionality.
  */
 function App() {
+    const [helpModalVisible, setHelpModalVisible] = useState(false); // Estado para el modal de ayuda
+
     const [config, setConfig] = useState({
         selectedModelType: 'rf',
         selectedTicker: 'NU',
@@ -66,6 +70,11 @@ function App() {
             const endDate = variables.config.endDate.toISOString().split('T')[0];
             const runId = `<span class="math-inline">\{modelType\}\-</span>{ticker}-<span class="math-inline">\{startDate\}\-</span>{endDate}`;
 
+            setResidualsData({
+            dates: result.residual_dates || [],
+            values: result.residuals     || []
+            });
+
             setTrainingResults(prevResults => ({
                 ...prevResults,
                 [runId]: { // Usar runId como clave
@@ -83,9 +92,6 @@ function App() {
             setLastModelUsed(result.model_path || `Trained ${modelType.toUpperCase()}`);
         },
         onErrorCallback: (err) => {
-            // Puedes mantener el setError si quieres mostrarlo en el Alert, o manejarlo solo con message
-            // setError(`Error al entrenar: ${err.message || 'Error desconocido'}`);
-
         }
         // onSettledCallback se puede usar para limpiar estados si fuera necesario
     });
@@ -97,12 +103,11 @@ function App() {
                 values: forecastResult.historical_values || []
             });
             setForecastData(forecastResult.predictions || []);
-            // Si el endpoint de forecast devuelve métricas actualizadas, úsalas
             // setMetrics(forecastResult.metrics || metrics); // Ojo: ¿Sobrescribir métricas de entrenamiento? Decide tu lógica
             setLastModelUsed(forecastResult.model_used || `Predicted with ${config.selectedModelType.toUpperCase()}`);
         },
         onErrorCallback: (err) => {
-             // setError(`Error al pronosticar: ${err.message || 'Error desconocido'}`);
+             //setError(`Error al pronosticar: ${err.message || 'Error desconocido'}`);
              setHistoricalData({ dates: [], values: [] }); // Limpiar datos en error
              setForecastData([]);
          }
@@ -112,7 +117,6 @@ function App() {
     const handleConfigChange = useCallback((newConfig) => {
         setConfig(prev => {
             const updatedConfig = { ...prev, ...newConfig };
-            // Asegurarse que las fechas sean objetos Date si vienen del panel
             if (newConfig.startDate && !(newConfig.startDate instanceof Date)) {
                 updatedConfig.startDate = new Date(newConfig.startDate);
             }
@@ -224,6 +228,8 @@ function App() {
     const latestRun = latestRunId ? trainingResults[latestRunId] : null;
     const currentBestParams = latestRun ? latestRun.bestParams : {};
     const featureNames = latestRun?.featureNames || [];
+    const featureImportances = latestRun?.featureImportances || [];
+    const [residualsData, setResidualsData] = useState({ dates: [], values: [] });
 
     // --- Define los items para las pestañas ---
     const resultTabs = [
@@ -253,25 +259,32 @@ function App() {
             children: (
                 <MetricsDisplay metrics={currentMetricsToDisplay} />
             ),
-             // Deshabilitar si no hay métricas? Opcional:
              disabled: !latestRunId || Object.keys(currentMetricsToDisplay).length === 0
         },
         {
             key: '3',
             label: 'Detalles del Modelo',
-            // Usa el nuevo componente y pásale los datos necesarios
             children: <ModelDetailsDisplay latestRun={latestRun} />,
-            // La condición disabled ahora solo depende de si existe una ejecución reciente
             disabled: !latestRunId
         },
         {
             key: '4',
             label: 'Comparación de Modelos',
             children: <ModelComparisonTable results={trainingResults} />,
-            disabled: Object.keys(trainingResults).length === 0 // Deshabilitar si no hay resultados
+            disabled: Object.keys(trainingResults).length === 0
+        },
+        {
+            key: '5',
+            label: 'Residuales',
+            children: (
+                <ResidualsDisplay
+                dates={residualsData.dates}
+                values={residualsData.values}
+                />
+            ),
+            disabled: residualsData.values.length === 0
         }
     ];
-
 
     // --- Renderizado con Tabs ---
     return (
@@ -279,8 +292,6 @@ function App() {
              theme={{
                  // Algoritmo para tema claro u oscuro
                  algorithm: currentTheme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-                 // Puedes personalizar tokens aquí si quieres
-                 // token: { colorPrimary: '#00b96b' },
              }}
          >
             <Layout style={{ minHeight: '100vh' }}>
@@ -293,10 +304,22 @@ function App() {
                     unCheckedChildren={<SunOutlined />}
                     onChange={toggleTheme}
                     checked={currentTheme === 'dark'}
-                    style={{ position: 'absolute', right: '20px', top: '16px' }} // Posicionar el switch
+                    style={{ position: 'absolute', right: '20px', top: '22px' }} // Posicionar el switch
+                />
+                <Button
+                    type="link"
+                    onClick={() => setHelpModalVisible(true)}
+                    style={{ position: 'absolute', right: '100px', top: '16px' }} // Posicionar el botón
+                >
+                    Ayuda
+                </Button>
+                <HelpModal
+                    visible={helpModalVisible}
+                    onClose={() => setHelpModalVisible(false)}
                 />
                 </Header>
-                <Content style={{ padding: '20px 50px' }}>
+                <Content style={{ padding: '20px ' }}>
+                    <div style={{ padding: '0 50px' }}>
                     {/* Mostrar error del hook si existe */}
                     {(trainMutation.error || forecastMutation.error) && (
                         <Alert
@@ -305,7 +328,6 @@ function App() {
                             type="error"
                             showIcon
                             closable
-                            // Opcional: resetear el estado de error del hook al cerrar
                             // onClose={() => { trainMutation.reset(); forecastMutation.reset(); }}
                         />
                     )}
@@ -321,10 +343,8 @@ function App() {
                                         onTrain={handleTrain} // Pasas la función handleTrain de App
                                         onForecast={handleForecast} // Pasas la función handleForecast de App
                                         initialConfig={config}
-                                        // ---- PASAR LA ADVERTENCIA COMO PROP ----
                                         dateRangeWarning={dateRangeWarning}
-                                        // --------------------------------------
-                                    />
+                                     />
                                 </Card>
                             </Spin>
                         </Col>
@@ -334,6 +354,7 @@ function App() {
                             </Card>
                         </Col>
                     </Row>
+                    </div>
                 </Content>
                 <Footer style={{ textAlign: 'center' }}>
                     Series de Tiempo Financieras V.0.1 ©{new Date().getFullYear()} Creado con Ant Design

@@ -14,6 +14,7 @@ import {
   Legend,
   TimeScale
 } from 'chart.js';
+import annotationPlugin from 'chartjs-plugin-annotation'; // Plugin de anotaciones
 import 'chartjs-adapter-date-fns'; // Adaptador para fechas
 import zoomPlugin from 'chartjs-plugin-zoom'; // Plugin de zoom y pan
 
@@ -27,69 +28,106 @@ ChartJS.register(
   Tooltip,
   Legend,
   TimeScale, // Registrar escala de tiempo
-  zoomPlugin // Registrar plugin de zoom
+  zoomPlugin, // Registrar plugin de zoom
+  annotationPlugin
 );
 
 /**
- * Displays a line chart combining historical and forecast data for a specific stock ticker.
+ * Renders a line chart displaying historical data and forecast predictions for a stock or asset.
+ * The chart can include historical prices, forecasted values, and confidence interval boundaries.
+ * Additionally, provides tools to reset zoom and export the chart as an image.
  *
- * @param {Object} params An object containing the historical data, forecast data, and the ticker symbol.
- * @param {Object} params.historicalData Historical data for the stock. Should include `dates` (array of strings) and `values` (array of numbers).
- * @param {Array<Object>} params.forecastData Forecast data for the stock. Each object should contain `date` (string) and `prediction` (number).
- * @param {string} params.ticker The stock ticker symbol.
- * @return {JSX.Element} Returns a line chart JSX component displaying the combined historical and forecast data. If no data is available, a message is rendered prompting the user to generate a forecast.
+ * @param {Object} param0 - The parameter object.
+ * @param {Object} param0.historicalData - Historical data for the asset, including dates and values.
+ * @param {string[]} param0.historicalData.dates - Array of historical data dates in string format.
+ * @param {number[]} param0.historicalData.values - Array of historical data values corresponding to the dates.
+ * @param {Object[]} param0.forecastData - Array of forecasted data points, each with prediction and confidence intervals.
+ * @param {string} param0.forecastData[].date - Date of the forecasted data point in string format.
+ * @param {number} param0.forecastData[].prediction - Forecasted value for the corresponding date.
+ * @param {number} [param0.forecastData[].lower_bound] - Lower bound of the confidence interval, if available.
+ * @param {number} [param0.forecastData[].upper_bound] - Upper bound of the confidence interval, if available.
+ * @param {string} param0.ticker - The stock or asset ticker symbol.
+ * @return {JSX.Element} The rendered chart component containing the historical and forecasted data visualization.
  */
 function GraphDisplay({ historicalData, forecastData, ticker }) {
     const chartRef = useRef(null);
 
     const hasHistoricalData = historicalData?.dates?.length > 0 && historicalData?.values?.length > 0;
-
     const hasForecastData = forecastData?.length > 0;
 
     if (!hasHistoricalData && !hasForecastData) {
-
         return <p style={{ textAlign: 'center', padding: '20px' }}>Genera un pronóstico para ver la gráfica.</p>;
     }
-
 
     const historicalDates = hasHistoricalData ? historicalData.dates : [];
     const forecastDates = hasForecastData ? forecastData.map(p => p.date) : [];
 
-    const allDates = [...new Set([...historicalDates, ...forecastDates])].sort((a, b) => new Date(a) - new Date(b));
+    const allDates = [...new Set([...historicalDates, ...forecastDates])]
+        .sort((a, b) => new Date(a) - new Date(b));
 
-    const historicalMap = new Map(hasHistoricalData ? historicalData.dates.map((d, i) => [d, historicalData.values[i]]) : []);
-    const forecastMap = new Map(hasForecastData ? forecastData.map(p => [p.date, p.prediction]) : []);
+    const historicalMap = new Map(
+        hasHistoricalData ? historicalData.dates.map((d, i) => [d, historicalData.values[i]]) : []
+    );
+
+    const forecastPredictionMap = new Map(
+        hasForecastData ? forecastData.map(p => [p.date, p.prediction]) : []
+    );
+    const forecastLowerBoundMap = new Map(
+        hasForecastData ? forecastData.map(p => [p.date, p.lower_bound]) : []
+    );
+    const forecastUpperBoundMap = new Map(
+        hasForecastData ? forecastData.map(p => [p.date, p.upper_bound]) : []
+    );
 
     const historicalMappedValues = allDates.map(date => historicalMap.get(date) ?? null);
-
-    const forecastMappedValues = allDates.map(date => forecastMap.get(date) ?? null);
+    const forecastMappedPredictions = allDates.map(date => forecastPredictionMap.get(date) ?? null);
+    const forecastMappedLowerBound = allDates.map(date => forecastLowerBoundMap.get(date) ?? null);
+    const forecastMappedUpperBound = allDates.map(date => forecastUpperBoundMap.get(date) ?? null);
 
     const chartData = {
-        labels: allDates, // Use the combined date array as labels
+        labels: allDates,
         datasets: []
     };
 
-
-
-    // Add historical dataset using the mapped values
     if (hasHistoricalData) {
          chartData.datasets.push({
             label: `Precio Histórico (${ticker})`,
-            data: historicalMappedValues, // Use the mapped array with nulls
+            data: historicalMappedValues,
             borderColor: 'rgb(75, 192, 192)',
             backgroundColor: 'rgba(75, 192, 192, 0.5)',
             tension: 0.1,
-            pointRadius: 1, // Puntos más pequeños para histórico
+            pointRadius: 1,
             pointHitRadius: 10,
             fill: false
         });
     }
 
-    // Add forecast dataset using the mapped values
     if (hasForecastData) {
+        const hasCIData = forecastData.some(p => p.lower_bound !== undefined && p.upper_bound !== undefined);
+        if (hasCIData) {
+            chartData.datasets.push({
+                label: 'Límite Inferior IC',
+                data: forecastMappedLowerBound,
+                borderColor: 'transparent',
+                borderWidth: 0,
+                pointRadius: 0,
+                fill: '-1'
+            });
+
+            chartData.datasets.push({
+                label: 'Límite Superior IC',
+                data: forecastMappedUpperBound,
+                borderColor: 'transparent',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                borderWidth: 1,
+                pointRadius: 0,
+                fill: '-1',
+            });
+        }
+
         chartData.datasets.push({
             label: 'Pronóstico',
-            data: forecastMappedValues,
+            data: forecastMappedPredictions,
             borderColor: 'rgb(255, 99, 132)',
             backgroundColor: 'rgba(255, 99, 132, 0.5)',
             borderDash: [5, 5], // Línea punteada
@@ -117,19 +155,13 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
         }
     };
 
+
     const options = {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
             legend: { position: 'top' },
             title: { display: true, text: `Serie de Tiempo y Pronóstico para ${ticker}` },
-            tooltip: {
-                mode: 'index',
-                intersect: false,
-                filter: function(tooltipItem) {
-                   return tooltipItem.raw !== null;
-                }
-            },
             zoom: {
                 pan: {
                     enabled: true, // Habilitar paneo (mover el gráfico)
