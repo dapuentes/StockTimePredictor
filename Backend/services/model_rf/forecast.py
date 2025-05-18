@@ -38,17 +38,23 @@ def forecast_future_prices(model, data, forecast_horizon=10, target_col='Close')
         X_last_scaled = X_last.values
 
     # Pronosticar precios futuros
-    forecast_scaled = model.predict_future(X_last_scaled, forecast_horizon)
+    forecast_scaled, lower_bounds_scaled, upper_bounds_scaled = model.predict_future(X_last_scaled, forecast_horizon)
 
     if model.target_scaler:
         forecast = model.target_scaler.inverse_transform(
             forecast_scaled.reshape(-1, 1)).ravel()
+        lower_bounds = model.target_scaler.inverse_transform(
+            lower_bounds_scaled.reshape(-1, 1)).ravel()
+        upper_bounds = model.target_scaler.inverse_transform(
+            upper_bounds_scaled.reshape(-1, 1)).ravel()
     else:
         forecast = forecast_scaled
+        lower_bounds = lower_bounds_scaled
+        upper_bounds = upper_bounds_scaled
 
     # Imprimir los resultados
     print(f"Forecasted prices for the next {forecast_horizon} days:")
     for i in range(forecast_horizon):
-        print(f"Day {i + 1}: {forecast[i]}")
+        print(f"Day {i + 1}: {forecast[i]:.4f} (Interval: [{lower_bounds[i]:4f} - {upper_bounds[i]:.4f}])")
 
-    return forecast
+    return forecast, lower_bounds, upper_bounds

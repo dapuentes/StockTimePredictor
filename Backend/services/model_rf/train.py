@@ -90,6 +90,10 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     train_metrics = evaluate_regression(y_train.flatten(), y_train_pred)
     print(f"Train metrics: {train_metrics}")
 
+    # Residuales
+    residuals = y_train.flatten() - y_train_pred
+    residuals_dates = test_data.index.tolist()
+
     # Evaluar el modelo
     model.evaluate(X_test_scaled, y_test)
     print(f"Model metrics: {model.metrics}")
@@ -99,4 +103,4 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
         model.save_model(save_model_path, training_end_date)
         print(f"Model saved to {save_model_path}")
 
-    return model, feature_names
+    return model, feature_names, residuals, residuals_dates

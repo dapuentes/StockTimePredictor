@@ -233,7 +233,7 @@ async def train_model(request: TrainRequest):
             )
 
         # Entrenar modelo
-        model, features_names = train_ts_model(
+        model, features_names, residuals, residual_dates = train_ts_model(
             data=data,
             n_lags=request.n_lags,
             target_col=request.target_col,
@@ -251,6 +251,8 @@ async def train_model(request: TrainRequest):
             "metrics": model.metrics,
             "features_names": features_names,
             "best_params": model.best_params_,
+            "residuals": residuals.tolist(),
+            "residual_dates": [d.strftime("%Y-%m-%d") for d in residual_dates],
             "model_path": os.path.basename(save_path)
         }
 
@@ -381,7 +383,7 @@ async def predict(
             )
 
         try:
-            forecast = forecast_future_prices(
+            forecast, lower_bounds, upper_bounds = forecast_future_prices(
                 model=model,
                 data=data.copy(),
                 forecast_horizon=forecast_horizon,
@@ -395,8 +397,14 @@ async def predict(
                 freq='B'  # 'B' para días hábiles del mercado
             ).strftime('%Y-%m-%d').tolist()
 
-            predictions = [{"date": date, "prediction": float(pred)}
-                           for date, pred in zip(forecast_dates, forecast)]
+            predictions = []
+            for i in range(len(forecast_dates)):
+                predictions.append({
+                    "date": forecast_dates[i],
+                    "prediction": float(forecast[i]),
+                    "lower_bound": float(lower_bounds[i]),
+                    "upper_bound": float(upper_bounds[i])
+                })
 
             historical_data_to_return = data.iloc[-history_days:]
             historical_dates = historical_data_to_return.index.strftime('%Y-%m-%d').tolist()

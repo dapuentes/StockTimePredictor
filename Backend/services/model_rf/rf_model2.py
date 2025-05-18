@@ -109,7 +109,7 @@ class TimeSeriesRandomForestModel:
         - DataFrame procesado con características
         """
 
-        from Backend.utils import feature_engineering, add_lags
+        from utils.preprocessing import feature_engineering, add_lags
 
         # Ordenar los datos por fecha si no está ordenado
         if isinstance(data.index, pd.DatetimeIndex):
@@ -255,11 +255,12 @@ class TimeSeriesRandomForestModel:
         - Diccionario con las métricas de evaluación
         """
 
-        from Backend.utils import evaluate_regression
+        from utils.evaluation import evaluate_regression
 
-        y_pred = self.best_pipeline_.predict(X_test)  # Usar best_pipeline_ en lugar de model
+        y_pred = self.best_pipeline_.predict(X_test)
         y_pred = self.target_scaler.inverse_transform(y_pred.reshape(-1, 1)).flatten()
         self.metrics = evaluate_regression(y_test, y_pred)
+
         return self.metrics
 
     def predict_future(self, X_test, forecast_horizon):
@@ -285,18 +286,48 @@ class TimeSeriesRandomForestModel:
             input_data = np.array(X_test).reshape(1, -1)
 
         # Predicción recursiva
-        predictions = []
+        predictions_scaled_list = []
+        lower_bounds_scaled_list = []
+        upper_bounds_scaled_list = []
         current_input = input_data.copy()
 
+        if not self.best_pipeline_:
+            raise ValueError("El modelo no ha sido ajustado. Por favor, ajuste el modelo antes de predecir.")
+
+        selector = self.best_pipeline_.named_steps.get('selector')
+        scaler = self.best_pipeline_.named_steps.get('scaler')
+        rf_model = self.best_pipeline_.named_steps.get('rf')
+
+        if not all([selector, scaler, rf_model]):
+            raise RuntimeError("El pipeline no contiene los pasos esperados: 'selector', 'scaler' y 'rf'.")
+        if not hasattr(rf_model, 'estimators_') or not rf_model.estimators_:
+            raise RuntimeError("El modelo Random Forest en el pipeline no tiene estimadores.")
+
         for _ in range(forecast_horizon):
-            pred = self.best_pipeline_.predict(current_input)[0]
-            predictions.append(pred)
+            # Predicción puntual
+            point_pred_scaled = self.best_pipeline_.predict(current_input)[0]
+            predictions_scaled_list.append(point_pred_scaled)
+
+            # Predicciones de cada árbol
+            current_input_selected = selector.transform(current_input)
+            current_input_scaled_for_rf = scaler.transform(current_input_selected)
+
+            individual_tree_preds_scaled = np.array([
+                tree.predict(current_input_scaled_for_rf)[0] for tree in rf_model.estimators_
+            ])
+
+            # Calcular los límites inferior y superior
+            lower_b_scaled = np.percentile(individual_tree_preds_scaled, 2.5)
+            upper_b_scaled = np.percentile(individual_tree_preds_scaled, 97.5)
+
+            lower_bounds_scaled_list.append(lower_b_scaled)
+            upper_bounds_scaled_list.append(upper_b_scaled)
 
             # Actualizar el input deslizando las características a la izquierda y añadiendo la predicción al final
-            current_input = np.roll(current_input, -1)
-            current_input[0, -1] = pred
+            current_input = np.roll(current_input, -1, axis=1)  # Asegurar axis=1 para array 2D
+            current_input[0, -1] = point_pred_scaled  # Usar la predicción puntual para la recursión
 
-        return np.array(predictions)
+        return np.array(predictions_scaled_list), np.array(lower_bounds_scaled_list), np.array(upper_bounds_scaled_list)
 
     def plot_results(self, y_true, y_pred, title="Model Predictions"):
         """
@@ -307,7 +338,7 @@ class TimeSeriesRandomForestModel:
         - y_pred: Valores predichos
         - title: Título del gráfico
         """
-        from Backend.utils.visualizations import plot_predictions
+        from utils.visualizations import plot_predictions
 
         plot_predictions(y_true, y_pred, title=title)
 
@@ -320,7 +351,7 @@ class TimeSeriesRandomForestModel:
         - forecast_values: Valores pronosticados
         - target_col: Nombre de la columna objetivo
         """
-        from Backend.utils.visualizations import plot_forecast
+        from utils.visualizations import plot_forecast
 
         plot_forecast(historical_data, forecast_values, target_col=target_col)
 
