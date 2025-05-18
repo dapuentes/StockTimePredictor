@@ -4,9 +4,9 @@ import { Layout, Row, Col, Card, Spin, Alert, Tabs, message, Button, Switch, Con
 import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import Papa from 'papaparse';
 import ResidualsDisplay from './components/ResidualsDisplay';
-import ConfigurationPanel from './components/ConfigurationPanel_AntD';
+import ConfigurationPanel from './components/ConfigurationPanel';
 import GraphDisplay from './components/GraphDisplay';
-import MetricsDisplay from './components/MetricsDisplay_AntD';
+import MetricsDisplay from './components/MetricsDisplay';
 import ModelComparisonTable from './components/ModelComparisonTable';
 import ModelDetailsDisplay from './components/ModelDetailsDisplay';
 import HelpModal from './components/HelpModal';
