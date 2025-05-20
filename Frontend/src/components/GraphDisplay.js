@@ -12,7 +12,8 @@ import {
   Title,
   Tooltip,
   Legend,
-  TimeScale
+  TimeScale,
+    Filler
 } from 'chart.js';
 import annotationPlugin from 'chartjs-plugin-annotation'; // Plugin de anotaciones
 import 'chartjs-adapter-date-fns'; // Adaptador para fechas
