@@ -1,60 +1,64 @@
-def forecast_future_prices(model, data, forecast_horizon=10, target_col='Close'):
-    """
-    Forecast future prices based on the given model and data.
+import pandas as pd
 
-    This function performs a future price prediction for a specified number of
-    days using the input model. It processes the data, scales features if
-    necessary, utilizes the model's prediction capabilities, and optionally
-    scales results back to their original scale. Additionally, it prints the
-    forecasted prices and generates a plot for visualization.
+def forecast_future_prices(
+    model,  # Instancia de TimeSeriesLSTMModel entrenada
+    historical_data_df: pd.DataFrame,
+    forecast_horizon: int = 10,
+    target_col: str = 'Close'
+):
+    """
+    Pronostica precios futuros utilizando un modelo LSTM entrenado.
 
     Args:
-        model: A predictive model object. This object should have the methods
-            `prepare_data`, `predict_future`, and `plot_forecast`. It may also
-            include optional scalers, `feature_scaler` and `target_scaler`, used
-            for preprocessing input features and postprocessing predicted values.
-        data: A DataFrame that contains historical data used for training and
-            generating future predictions.
-        forecast_horizon: int, optional. The number of days to forecast into
-            the future. Defaults to 10.
-        target_col: str, optional. The name of the column in the data which
-            serves as the target variable for prediction. Defaults to 'Close'.
+        model (TimeSeriesLSTMModel): Instancia del modelo LSTM entrenado.
+        historical_data_df (pd.DataFrame): DataFrame con los datos históricos necesarios
+                                           para generar la última secuencia de entrada para el modelo.
+        forecast_horizon (int): Número de períodos futuros a pronosticar.
+        target_col (str): Nombre de la columna objetivo.
 
     Returns:
-        list: A list of forecasted future prices corresponding to the next
-            `forecast_horizon` days.
+        tuple: (
+            np.ndarray: Array con los valores pronosticados.
+            None: Placeholder para límites inferiores (no implementado para LSTM aquí).
+            None: Placeholder para límites superiores (no implementado para LSTM aquí).
+        )
     """
+    print(f"--- Iniciando pronóstico LSTM para los próximos {forecast_horizon} períodos de '{target_col}' ---")
 
-    # Preparar los datos más recientes
-    processed_data = model.prepare_data(data, target_col=target_col)
+    if not hasattr(model, 'predict_future'):
+        raise AttributeError("El objeto 'model' no tiene un método 'predict_future'. Asegúrate de pasar una instancia entrenada de TimeSeriesLSTMModel.")
+    if not isinstance(historical_data_df, pd.DataFrame):
+        raise TypeError("historical_data_df debe ser un DataFrame de pandas.")
+    if historical_data_df.empty:
+        raise ValueError("historical_data_df no puede estar vacío.")
 
-    # Obtener la última fila de datos para la predicción
-    last_data = processed_data.iloc[-1:]
-    X_last = last_data.drop(columns=[target_col])
+    # El método predict_future del modelo LSTM se encarga de la lógica de predicción recursiva.
+    # Devuelve solo las predicciones puntuales.
+    try:
+        forecast_values = model.predict_future(
+            historical_data_df=historical_data_df.copy(), # Usar una copia para seguridad
+            forecast_horizon=forecast_horizon,
+            target_col=target_col
+        )
+        print(f"Pronóstico LSTM para '{target_col}' para los próximos {forecast_horizon} períodos:")
+        if forecast_values is not None and len(forecast_values) > 0:
+            for i, value in enumerate(forecast_values):
+                print(f"Período {i + 1}: {value:.4f}")
+        else:
+            print("No se generaron valores de pronóstico.")
 
-    if model.feature_scaler:
-        X_last_scaled = model.feature_scaler.transform(X_last)
-    else:
-        X_last_scaled = X_last.values
+        # Por ahora, no se implementan límites inferiores y superiores para LSTM.
+        lower_bounds = None
+        upper_bounds = None
 
-    # Pronosticar precios futuros
-    forecast_scaled = model.predict_future(X_last_scaled, forecast_horizon)
+        print("--- Pronóstico LSTM finalizado ---")
+        return forecast_values, lower_bounds, upper_bounds
 
-    if model.target_scaler:
-        forecast = model.target_scaler.inverse_transform(
-            forecast_scaled.reshape(-1, 1)).ravel()
-    else:
-        forecast = forecast_scaled
+    except Exception as e:
+        print(f"Error durante el proceso de pronóstico LSTM: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None
 
-    # Imprimir los resultados
-    print(f"Forecasted prices for the next {forecast_horizon} days:")
-    for i in range(forecast_horizon):
-        print(f"Day {i + 1}: {forecast[i]}")
 
-    model.plot_forecast(
-        data,
-        forecast,
-        target_col=target_col
-    )
 
-    return forecast

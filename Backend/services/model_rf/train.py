@@ -31,7 +31,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
             The trained time series Random Forest model.
     """
 
-    from Backend.utils import scale_data
+    from utils.preprocessing import scale_data
 
     model = TimeSeriesRandomForestModel(n_lags=n_lags)
 
@@ -59,6 +59,8 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     # Guardar los nombres de las características antes de escalar
     feature_names = X_train.columns.tolist()
     print(f"Feature names: {feature_names}")
+    print(f"len(X_train): {len(feature_names)}")
+    print(f"names: {X_train.columns.tolist()}")
 
     # Escalar los datos
     X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler = scale_data(
@@ -78,6 +80,10 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     )
     print(f"Best parameters: {model.best_params_}")
 
+    # selected_indices = model.best_params_.get('selector__features_index')
+    # feature_importances = model.feature_importances_.tolist()
+    # print(f"Feature importances: {feature_importances}")
+
     # Modelo de entrenamiento
     y_train_pred_scaled = model.best_pipeline_.predict(X_train_scaled)
 
@@ -86,7 +92,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     else:
         y_train_pred = y_train_pred_scaled
 
-    from Backend.utils import evaluate_regression
+    from utils.evaluation import evaluate_regression
     train_metrics = evaluate_regression(y_train.flatten(), y_train_pred)
     print(f"Train metrics: {train_metrics}")
 

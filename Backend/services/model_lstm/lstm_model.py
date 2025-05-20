@@ -1,794 +1,450 @@
-from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.models import Sequential, load_model as keras_load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
+import tensorflow as tf  # Importar TensorFlow
+# Ensure KerasTuner is installed: pip install keras-tuner
 from kerastuner.tuners import RandomSearch, BayesianOptimization, Hyperband
+from kerastuner import HyperModel
 from sklearn.preprocessing import StandardScaler
-from sklearn.base import BaseEstimator, TransformerMixin
 import numpy as np
 import pandas as pd
 import os
 import json
+import pickle
 import matplotlib.pyplot as plt
 
-
-class FeatureSelector(BaseEstimator, TransformerMixin):
-    """
-    A transformer for selecting specific features from a dataset.
-
-    FeatureSelector is a custom transformer that enables feature selection
-    by specifying their indices. It implements the scikit-learn TransformerMixin
-    and can be used in machine learning pipelines to preprocess data
-    before feeding it into a model. The user has to provide a list of indices
-    representing the features to select, or it will default to returning
-    all features.
-
-    Attributes:
-        features_index (Optional[List[int]]): A list of feature indices to select.
-            If None, all features will be returned.
-    """
-
-    def __init__(self, features_index=None):
-        self.features_index = features_index
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        if self.features_index is None:
-            return X
-        return X[:, self.features_index]
+# Import specific functions from your utility modules
+from utils.preprocessing import feature_engineering, add_lags
+from utils.evaluation import evaluate_regression
 
 
 class SequenceGenerator:
-    """
-    Utility class to generate sequences for LSTM model training.
-
-    This class transforms time series data into sequences suitable for training
-    LSTM models by creating sliding windows of input-output pairs.
-
-    Attributes:
-        n_lags (int): Length of input sequences
-        target_steps (int): Number of future steps to predict
-    """
-
-    def __init__(self, n_lags=10, target_steps=1):
-        """
-        Initialize the sequence generator.
-
-        Args:
-            n_lags (int): Length of the input sequences
-            target_steps (int): Number of future steps to predict
-        """
+    def __init__(self, n_lags=10):
         self.n_lags = n_lags
-        self.target_steps = target_steps
+        self.target_steps = 1
 
-    def create_sequences(self, data, target_col=None):
-        """
-        Create sequence data from time series.
-
-        Args:
-            data (array-like): Input time series data
-            target_col (int, optional): Index of target column. If None, uses last column.
-
-        Returns:
-            tuple: (X, y) where X contains input sequences and y contains target values
-        """
-        if isinstance(data, pd.DataFrame):
-            if target_col is None:
-                # Usa la última columna como objetivo
-                target_col = data.columns[-1]
-
-            # Convertir DataFrame to numpy array
-            y_data = data[target_col].values
-            if len(data.columns) > 1:
-                X_data = data.drop(columns=[target_col]).values
-            else:
-                X_data = data.values
-        else:
-            X_data = data
-            y_data = data[:, -1] if target_col is None else data[:, target_col]
-
-        X, y = [], []
-
-        for i in range(len(X_data) - self.n_lags - self.target_steps + 1):
-            # Secuencia de entrada
-            X.append(X_data[i:(i + self.n_lags)])
-
-            # Valor objetivo
-            if self.target_steps == 1:
-                y.append(y_data[i + self.n_lags])
-            else:
-                y.append(y_data[(i + self.n_lags):(i + self.n_lags + self.target_steps)])
-
-        return np.array(X), np.array(y)
+    def create_sequences(self, X_data, y_data):
+        X_seq, y_seq = [], []
+        if len(y_data.shape) == 1:
+            y_data = y_data.reshape(-1, 1)
+        if len(X_data) <= self.n_lags:
+            raise ValueError(f"Not enough data to create sequences. Need > {self.n_lags} samples, got {len(X_data)}.")
+        for i in range(len(X_data) - self.n_lags):
+            X_seq.append(X_data[i:(i + self.n_lags)])
+            y_seq.append(y_data[i + self.n_lags])  # Target is at step i + n_lags
+        if not X_seq:
+            return np.array([]).reshape(0, self.n_lags, X_data.shape[1] if X_data.ndim > 1 else 1), np.array(
+                []).reshape(0, 1)
+        return np.array(X_seq), np.array(y_seq)
 
 
 class TimeSeriesLSTMModel:
-    """
-    A deep learning model for time series forecasting based on LSTM.
-
-    This class implements an LSTM-based model configured for handling
-    time series data. It includes methods for preparing data with feature
-    engineering, optimizing hyperparameters, fitting the model, making predictions,
-    and evaluating performance. It supports advanced functionality such as multi-step
-    future prediction and allows customization of network architecture.
-
-    Attributes:
-        model (Sequential): The Keras LSTM model
-        n_lags (int): The length of input sequences
-        forecast_horizon (int): Number of steps to forecast
-        feature_scaler (StandardScaler): Scaler for features
-        target_scaler (StandardScaler): Scaler for target variable
-        feature_names (Optional[list]): List of feature names used in training
-        sequence_generator (SequenceGenerator): Utility for creating LSTM sequences
-        metrics (dict): Performance metrics after evaluation
-    """
-
     def __init__(self,
                  units=50,
                  layers=1,
-                 dropout=0.2,
+                 dropout_rate=0.2,
                  learning_rate=0.001,
-                 n_lags=10,
-                 forecast_horizon=1
+                 n_lags=10
                  ):
-        """
-        Initialize the LSTM model with configurable parameters.
-
-        Args:
-            units (int): Number of LSTM units per layer
-            layers (int): Number of LSTM layers
-            dropout (float): Dropout rate for regularization
-            learning_rate (float): Learning rate for optimizer
-            n_lags (int): Length of input sequences
-            forecast_horizon (int): Number of future steps to predict
-        """
         self.units = units
         self.layers = layers
-        self.dropout = dropout
+        self.dropout_rate = dropout_rate
         self.learning_rate = learning_rate
         self.n_lags = n_lags
-        self.forecast_horizon = forecast_horizon
-
-        # Otros atributos
+        self.model_output_steps = 1
         self.model = None
         self.feature_scaler = StandardScaler()
         self.target_scaler = StandardScaler()
         self.feature_names = None
-        self.sequence_generator = SequenceGenerator(n_lags=n_lags,
-                                                    target_steps=forecast_horizon)
+        self.sequence_generator = SequenceGenerator(n_lags=self.n_lags)
         self.metrics = {}
+        self.history = None
+        self.best_hyperparameters = None
 
-        # Arquitectura del modelo
-        self._build_model()
+    def _build_model(self, n_features, units=None, layers=None, dropout_rate=None, learning_rate=None):
+        units = units if units is not None else self.units
+        layers = layers if layers is not None else self.layers
+        dropout_rate = dropout_rate if dropout_rate is not None else self.dropout_rate
+        learning_rate = learning_rate if learning_rate is not None else self.learning_rate
 
-    def _build_model(self, n_features=1):
-        """
-        Build the LSTM model architecture.
-
-        Args:
-            n_features (int): Number of input features
-        """
         model = Sequential()
-
-        # Add LSTM layers
-        for i in range(self.layers):
-            return_sequences = i < self.layers - 1  # Retorna secuencias solo si no es la última capa
-
+        for i in range(layers):
+            return_sequences = i < layers - 1
             if i == 0:
-                model.add(LSTM(units=self.units,
+                model.add(LSTM(units=units,
                                return_sequences=return_sequences,
                                input_shape=(self.n_lags, n_features)))
             else:
-                model.add(LSTM(units=self.units, return_sequences=return_sequences))
-
-            # La regularización se utiliza para evitar el sobreajuste
+                model.add(LSTM(units=units, return_sequences=return_sequences))
             model.add(BatchNormalization())
-            model.add(Dropout(self.dropout))
-
-        # Capa de salida
-        if self.forecast_horizon == 1:
-            model.add(Dense(1))
-        else:
-            model.add(Dense(self.forecast_horizon))
-
-        optimizer = Adam(learning_rate=self.learning_rate)
-        model.compile(optimizer=optimizer, loss='mse')
-
+            model.add(Dropout(dropout_rate))
+        model.add(Dense(self.model_output_steps))
+        optimizer = Adam(learning_rate=learning_rate)
+        # Usar el objeto de función para la pérdida
+        model.compile(optimizer=optimizer, loss=tf.keras.losses.MeanSquaredError(),
+                      metrics=[tf.keras.metrics.MeanAbsoluteError()])
         self.model = model
         return model
 
     def prepare_data(self, data, target_col='Close'):
-        """
-        Prepare time series data with feature engineering.
-
-        Args:
-            data (DataFrame): Input data containing the time series
-            target_col (str): Name of the target column for prediction
-
-        Returns:
-            DataFrame: Processed DataFrame with features
-        """
-        from Backend.utils import feature_engineering, add_lags
-
-        # Si los datos no estan ordenados, ordenarlos por índice
-        if isinstance(data.index, pd.DatetimeIndex):
-            data = data.sort_index()
-
-        # Crear características de retraso
-        data_with_lags = add_lags(data, target_col=target_col, n_lags=self.n_lags)
-
-        # Caracteristicas adicionales
-        required_cols = ['Close']
-        if all(col in data.columns for col in required_cols):
+        data_copy = data.copy()
+        if not isinstance(data_copy.index, pd.DatetimeIndex):
             try:
-                return feature_engineering(data_with_lags)
+                data_copy.index = pd.to_datetime(data_copy.index)
             except Exception as e:
-                print(f"Warning: Could not apply full feature engineering: {e}")
-                print("Using only lag features instead.")
-                return data_with_lags
-        else:
-            print(f"Warning: Missing required columns {required_cols}. Using only lag features.")
-            return data_with_lags
-
-    def preprocess_data(self, X, y=None, is_training=True):
-        """
-        Scale features and target data.
-
-        Args:
-            X (array-like): Feature data
-            y (array-like, optional): Target data
-            is_training (bool): Whether this is training data
-
-        Returns:
-            tuple: Scaled X and y data
-        """
-        # Scale features
-        if is_training:
-            X_scaled = self.feature_scaler.fit_transform(X)
-        else:
-            X_scaled = self.feature_scaler.transform(X)
-
-        # Scale target if provided
-        if y is not None:
-            if is_training:
-                y_reshaped = y.reshape(-1, 1) if len(y.shape) == 1 else y
-                y_scaled = self.target_scaler.fit_transform(y_reshaped)
+                print(f"Warning: Could not convert DataFrame index to DatetimeIndex: {e}")
+        if isinstance(data_copy.index, pd.DatetimeIndex):
+            data_copy = data_copy.sort_index()
+        data_with_lags = add_lags(data_copy, target_col=target_col, n_lags=self.n_lags)
+        try:
+            if 'Close' not in data_with_lags.columns:
+                print(f"Warning: 'Close' column not found for feature_engineering. Using only lag features.")
+                processed_data = data_with_lags
             else:
-                y_reshaped = y.reshape(-1, 1) if len(y.shape) == 1 else y
-                y_scaled = self.target_scaler.transform(y_reshaped)
+                processed_data = feature_engineering(data_with_lags)
+        except Exception as e:
+            print(f"Error during feature_engineering: {e}. Using only lag features.")
+            processed_data = data_with_lags
+        return processed_data.dropna()
 
-            # Reshape back if it was 1D
-            if len(y.shape) == 1:
-                y_scaled = y_scaled.flatten()
+    def preprocess_data(self, data_df, target_col='Close', is_training=True):
+        if target_col not in data_df.columns:
+            raise ValueError(
+                f"Target column '{target_col}' not found in DataFrame. Available columns: {data_df.columns.tolist()}")
+        y_values = data_df[target_col].values.reshape(-1, 1)
+        feature_cols = data_df.drop(columns=[target_col]).columns
+        X_df_features_only = data_df[feature_cols].apply(pd.to_numeric, errors='coerce')
+        if X_df_features_only.isnull().values.any():
+            print("Warning: NaNs found in feature data after numeric conversion. Filling with 0.")
+            X_df_features_only = X_df_features_only.fillna(0)
+        X_values = X_df_features_only.values
 
-            return X_scaled, y_scaled
-
-        return X_scaled
-
-    def fit(self, X_train, y_train, validation_data=None, epochs=100, batch_size=32, verbose=1):
-        """
-        Train the LSTM model.
-
-        Args:
-            X_train (array-like): Training features
-            y_train (array-like): Training targets
-            validation_data (tuple, optional): Validation data (X_val, y_val)
-            epochs (int): Number of training epochs
-            batch_size (int): Batch size for training
-            verbose (int): Verbosity level (0, 1, or 2)
-
-        Returns:
-            self: The fitted model instance
-        """
-        # Escalar los datos
-        X_scaled, y_scaled = self.preprocess_data(X_train, y_train, is_training=True)
-
-        X_seq, y_seq = self.sequence_generator.create_sequences(X_scaled)
-
-        # Se tiene que reconstruir el modelo si no existe o si la forma de entrada ha cambiado
-        if self.model is None or self.model.input_shape[2] != X_seq.shape[2]:
-            self._build_model(n_features=X_seq.shape[2])
-
-        # Validación de datos
-        val_data = None
-        if validation_data is not None:
-            X_val, y_val = validation_data
-            X_val_scaled, y_val_scaled = self.preprocess_data(X_val, y_val, is_training=False)
-            X_val_seq, y_val_seq = self.sequence_generator.create_sequences(X_val_scaled)
-            val_data = (X_val_seq, y_val_seq)
-
-        # Callbacks para detener el entrenamiento temprano y guardar el mejor modelo
-        callbacks = [
-            EarlyStopping(monitor='val_loss' if val_data else 'loss',
-                          patience=10, restore_best_weights=True),
-            ModelCheckpoint('best_model.h5', save_best_only=True,
-                            monitor='val_loss' if val_data else 'loss')
-        ]
-
-        # Entrenar el modelo
-        history = self.model.fit(
-            X_seq, y_seq,
-            epochs=epochs,
-            batch_size=batch_size,
-            validation_data=val_data,
-            callbacks=callbacks,
-            verbose=verbose
-        )
-
-        return self
-
-    def predict(self, X):
-        """
-        Make predictions using the trained model.
-
-        Args:
-            X (array-like): Input features for prediction
-
-        Returns:
-            array: Model predictions
-        """
-        # Scale the features
-        X_scaled = self.preprocess_data(X, is_training=False)
-
-        # Create sequences
-        X_seq, _ = self.sequence_generator.create_sequences(X_scaled)
-
-        # Hacer predicciones
-        y_pred_scaled = self.model.predict(X_seq)
-
-        # Transformación inversa de las predicciones
-        if y_pred_scaled.ndim == 2:
-            y_pred = self.target_scaler.inverse_transform(y_pred_scaled)
+        if is_training:
+            self.feature_names = feature_cols.tolist()
+            X_scaled = self.feature_scaler.fit_transform(X_values)
+            y_scaled = self.target_scaler.fit_transform(y_values)
         else:
-            original_shape = y_pred_scaled.shape
-            y_pred_scaled_reshaped = y_pred_scaled.reshape(-1, 1)
-            y_pred_reshaped = self.target_scaler.inverse_transform(y_pred_scaled_reshaped)
-            y_pred = y_pred_reshaped.reshape(original_shape)
+            if self.feature_names is None:
+                print("Warning: feature_names not set. Assuming prediction data columns match training.")
+            if hasattr(self.feature_scaler, 'n_features_in_') and X_values.shape[
+                1] != self.feature_scaler.n_features_in_:
+                raise ValueError(
+                    f"Feature count mismatch: scaler expects {self.feature_scaler.n_features_in_}, got {X_values.shape[1]}.")
+            X_scaled = self.feature_scaler.transform(X_values)
+            y_scaled = self.target_scaler.transform(y_values)
+        return X_scaled, y_scaled.flatten()
 
-        return y_pred
+    def fit(self, train_df, target_col='Close', validation_df=None, epochs=100, batch_size=32, verbose=1):
+        X_train_scaled, y_train_scaled = self.preprocess_data(train_df, target_col, is_training=True)
+        X_train_seq, y_train_seq = self.sequence_generator.create_sequences(X_train_scaled, y_train_scaled)
+        if X_train_seq.shape[0] == 0:
+            raise ValueError("No sequences generated from training data.")
+        n_features = X_train_seq.shape[2]
+        if self.model is None or self.model.input_shape[-1] != n_features:
+            self._build_model(n_features=n_features)
 
-    def optimize_hyperparameters(self, X_train, y_train, X_val=None, y_val=None, feature_names=None,
-                                 strategy="adaptive"):
-        """
-        Optimize the hyperparameters for an LSTM model using Keras Tuner and train the final model 
-        with the best-found parameters. This function includes preprocessing the training and 
-        validation data, creating sequences for training, hyperparameter optimization via various 
-        strategies, and final model training with the optimized hyperparameters.
-
-        Parameters:
-            X_train: numpy.ndarray
-                Training feature dataset, expected to be 2-dimensional, which will be scaled and 
-                converted into sequences for LSTM training.
-
-            y_train: numpy.ndarray
-                Training target dataset, expected to be a single-dimensional array or compatible with 
-                the LSTM sequence generator.
-
-            X_val: numpy.ndarray, optional, default=None
-                Validation feature dataset used for hyperparameter tuning. Will be processed if provided; 
-                otherwise, a validation split is used during the training phase.
-
-            y_val: numpy.ndarray, optional, default=None
-                Validation target dataset consistent with `X_val`. Ignored if `X_val` is not provided.
-
-            feature_names: list of str, optional, default=None
-                List of feature names corresponding to the columns in `X_train` and other datasets.
-
-            strategy: str, optional, default="adaptive"
-                The optimization strategy to use for hyperparameter tuning. Supports "random", 
-                "bayesian", "hyperband", or "adaptive" selection based on dataset characteristics.
-
-        Returns:
-            Object
-                Returns the object instance with the optimized hyperparameters applied and the 
-                final model trained.
-        """
-        self.feature_names = feature_names
-
-        # Preprocesar los datos
-        X_scaled, y_scaled = self.preprocess_data(X_train, y_train, is_training=True)
-
-        # Crear secuencias
-        X_seq, y_seq = self.sequence_generator.create_sequences(X_scaled)
-
-        # Preparar datos de validación si se proporcionan
-        if X_val is not None and y_val is not None:
-            X_val_scaled, y_val_scaled = self.preprocess_data(X_val, y_val, is_training=False)
-            X_val_seq, y_val_seq = self.sequence_generator.create_sequences(X_val_scaled)
-            validation_data = (X_val_seq, y_val_seq)
-            validation_split = None
-        else:
-            validation_data = None
-            validation_split = 0.2
-
-        # Definir el modelo hiperparametrizado
-        from kerastuner import HyperModel
-        class MyHyperModel(HyperModel):
-            def __init__(self, input_shape):
-                self.input_shape = input_shape
-
-            def build(self, hp):
-                model = Sequential()
-
-                # Determinar número de capas
-                n_layers = hp.Int('n_layers', min_value=1, max_value=3, default=1)
-
-                # Primera capa LSTM
-                units = hp.Int('units', min_value=32, max_value=256, step=32, default=64)
-                return_sequences = True if n_layers > 1 else False
-
-                model.add(LSTM(
-                    units=units,
-                    return_sequences=return_sequences,
-                    input_shape=self.input_shape
-                ))
-
-                model.add(Dropout(
-                    hp.Float('dropout', min_value=0.0, max_value=0.5, step=0.1, default=0.2)
-                ))
-
-                # Capas adicionales
-                for i in range(1, n_layers):
-                    return_sequences = i < n_layers - 1
-                    model.add(LSTM(
-                        units=hp.Int(f'units_{i + 1}', min_value=16, max_value=128, step=16, default=32),
-                        return_sequences=return_sequences
-                    ))
-                    model.add(Dropout(
-                        hp.Float(f'dropout_{i + 1}', min_value=0.0, max_value=0.5, step=0.1, default=0.2)
-                    ))
-
-                # Capa de salida
-                model.add(Dense(1))
-
-                # Compilación
-                model.compile(
-                    optimizer=Adam(
-                        learning_rate=hp.Float('learning_rate', min_value=1e-4, max_value=1e-2,
-                                               sampling='log', default=1e-3)
-                    ),
-                    loss='mean_squared_error'
-                )
-
-                return model
-
-        # Crear el modelo hiperparametrizado
-        hypermodel = MyHyperModel(input_shape=(X_seq.shape[1], X_seq.shape[2]))
-
-        # Función para seleccionar la estrategia de optimización
-        def get_tuner(strategy, hypermodel):
-            if strategy == "random":
-                return RandomSearch(
-                    hypermodel=hypermodel,
-                    objective='val_loss',
-                    max_trials=20,
-                    executions_per_trial=2,
-                    directory='tuner_dir',
-                    project_name='lstm_random_search'
-                )
-            elif strategy == "bayesian":
-                return BayesianOptimization(
-                    hypermodel=hypermodel,
-                    objective='val_loss',
-                    max_trials=20,
-                    executions_per_trial=2,
-                    directory='tuner_dir',
-                    project_name='lstm_bayesian_opt'
-                )
-            elif strategy == "hyperband":
-                return Hyperband(
-                    hypermodel=hypermodel,
-                    objective='val_loss',
-                    max_epochs=50,
-                    factor=3,
-                    directory='tuner_dir',
-                    project_name='lstm_hyperband'
-                )
-            elif strategy == "adaptive":
-                # La lógica para selección adaptativa
-                if X_seq.shape[0] > 10000:  # Para datasets grandes
-                    return Hyperband(
-                        hypermodel=hypermodel,
-                        objective='val_loss',
-                        max_epochs=50,
-                        factor=3,
-                        directory='tuner_dir',
-                        project_name='lstm_adaptive'
-                    )
+        val_data_processed = None
+        if validation_df is not None and not validation_df.empty:
+            X_val_scaled, y_val_scaled = self.preprocess_data(validation_df, target_col, is_training=False)
+            if len(X_val_scaled) > self.n_lags:
+                X_val_seq, y_val_seq = self.sequence_generator.create_sequences(X_val_scaled, y_val_scaled)
+                if X_val_seq.shape[0] > 0:
+                    val_data_processed = (X_val_seq, y_val_seq)
                 else:
-                    return BayesianOptimization(
-                        hypermodel=hypermodel,
-                        objective='val_loss',
-                        max_trials=20,
-                        executions_per_trial=2,
-                        directory='tuner_dir',
-                        project_name='lstm_adaptive'
-                    )
+                    print("Warning: No sequences from validation data for Keras fit.")
+            else:
+                print(f"Warning: Validation data too short for {self.n_lags} lags for Keras fit.")
 
-        # Obtener el tuner según la estrategia seleccionada
-        tuner = get_tuner(strategy, hypermodel)
-
-        # Ejecutar la búsqueda
-        tuner.search(
-            X_seq, y_seq,
-            epochs=50,
-            batch_size=32,
-            callbacks=[EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)],
-            validation_data=validation_data,
-            validation_split=validation_split,
-            verbose=1
+        # Cambiar extensión a .keras para ModelCheckpoint
+        checkpoint_filepath = 'best_lstm_model.keras'
+        callbacks = [
+            EarlyStopping(monitor='val_loss' if val_data_processed else 'loss', patience=15, restore_best_weights=True,
+                          verbose=verbose),
+            ModelCheckpoint(filepath=checkpoint_filepath, save_best_only=True,
+                            monitor='val_loss' if val_data_processed else 'loss', verbose=verbose)
+        ]
+        self.history = self.model.fit(
+            X_train_seq, y_train_seq, epochs=epochs, batch_size=batch_size,
+            validation_data=val_data_processed, callbacks=callbacks, verbose=verbose
         )
-
-        # Obtener los mejores hiperparámetros
-        best_hp = tuner.get_best_hyperparameters(1)[0] # Estan en el índice 0
-        print("Mejores hiperparámetros encontrados:")
-        print(f"- n_layers: {best_hp.get('n_layers')}")
-        print(f"- units: {best_hp.get('units')}")
-        print(f"- dropout: {best_hp.get('dropout')}")
-        print(f"- learning_rate: {best_hp.get('learning_rate')}")
-
-        # Actualizar los hiperparámetros del modelo
-        self.layers = best_hp.get('n_layers')
-        self.units = best_hp.get('units')
-        self.dropout = best_hp.get('dropout')
-        self.learning_rate = best_hp.get('learning_rate')
-
-        # Construir y entrenar el modelo final con los mejores hiperparámetros
-        self._build_model(n_features=X_seq.shape[2])
-
-        # Reentrenar el modelo con todas las épocas
-        self.model.fit(
-            X_seq, y_seq,
-            epochs=100,  # Más épocas para entrenamiento final
-            batch_size=32,
-            validation_split=0.2,
-            callbacks=[EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)],
-            verbose=1
-        )
-
+        if os.path.exists(checkpoint_filepath):
+            print(f"Loading best model from {checkpoint_filepath}")
+            self.model = keras_load_model(
+                checkpoint_filepath)  # No custom_objects needed for standard losses/optimizers with .keras
         return self
 
-    def evaluate(self, X_test, y_test):
-        """
-        Evaluate the model using performance metrics.
+    def predict(self, data_df, target_col='Close'):
+        if self.model is None: raise ValueError("Model not trained or loaded.")
+        temp_data_df = data_df.copy()
+        if target_col not in temp_data_df.columns: temp_data_df[target_col] = 0
+        X_pred_scaled, _ = self.preprocess_data(temp_data_df, target_col, is_training=False)
+        if len(X_pred_scaled) < self.n_lags:
+            raise ValueError(f"Prediction data must have at least {self.n_lags} samples, got {len(X_pred_scaled)}.")
+        dummy_y_for_seq = np.zeros(len(X_pred_scaled))
+        X_pred_seq, _ = self.sequence_generator.create_sequences(X_pred_scaled, dummy_y_for_seq)
+        if X_pred_seq.shape[0] == 0:
+            print("Warning: No sequences for prediction. Returning empty array.")
+            return np.array([])
+        y_pred_scaled = self.model.predict(X_pred_seq, verbose=0)
+        y_pred = self.target_scaler.inverse_transform(y_pred_scaled)
+        return y_pred.flatten()
 
-        Args:
-            X_test (array-like): Test features
-            y_test (array-like): Test targets
+    def optimize_hyperparameters(self, train_df, target_col='Close', validation_df=None,
+                                 strategy="bayesian", max_trials=10, epochs_per_trial=50,
+                                 project_name="lstm_tuning"):
+        X_train_scaled, y_train_scaled = self.preprocess_data(train_df, target_col, is_training=True)
+        X_train_seq, y_train_seq = self.sequence_generator.create_sequences(X_train_scaled, y_train_scaled)
+        if X_train_seq.shape[0] == 0: raise ValueError("No sequences from training data for HP tuning.")
+        n_features = X_train_seq.shape[2]
 
-        Returns:
-            dict: Dictionary with evaluation metrics
-        """
-        from Backend.utils import evaluate_regression
+        val_data_processed = None
+        if validation_df is not None and not validation_df.empty:
+            X_val_scaled, y_val_scaled = self.preprocess_data(validation_df, target_col, is_training=False)
+            if len(X_val_scaled) > self.n_lags:
+                X_val_seq, y_val_seq = self.sequence_generator.create_sequences(X_val_scaled, y_val_scaled)
+                if X_val_seq.shape[0] > 0:
+                    val_data_processed = (X_val_seq, y_val_seq)
+                else:
+                    print("Warning: No sequences from validation data for Keras Tuner.")
+            else:
+                print(f"Warning: Validation data too short for {self.n_lags} lags for Keras Tuner.")
 
-        # Scale the data
-        X_test_scaled, y_test_scaled = self.preprocess_data(X_test, y_test, is_training=False)
+        hyper_model_instance_attrs = {'layers': self.layers, 'units': self.units, 'dropout_rate': self.dropout_rate,
+                                      'learning_rate': self.learning_rate}
+        hypermodel = LSTMHyperModel(self.n_lags, n_features, self.model_output_steps, **hyper_model_instance_attrs)
 
-        # Crear secuencias
-        X_seq, y_seq = self.sequence_generator.create_sequences(X_test_scaled)
-
-        # Hacer predicciones
-        y_pred_scaled = self.model.predict(X_seq)
-
-        # Transformación inversa de las predicciones
-        if y_pred_scaled.ndim == 2:
-            y_pred = self.target_scaler.inverse_transform(y_pred_scaled)
+        common_tuner_params = {'hypermodel': hypermodel, 'objective': 'val_loss' if val_data_processed else 'loss',
+                               'directory': 'tuner_dir', 'project_name': project_name, 'overwrite': True}
+        if strategy == "random":
+            tuner = RandomSearch(**common_tuner_params, max_trials=max_trials, executions_per_trial=1)
+        elif strategy == "hyperband":
+            tuner = Hyperband(**common_tuner_params, max_epochs=epochs_per_trial, factor=3)
         else:
-            original_shape = y_pred_scaled.shape
-            y_pred_scaled_reshaped = y_pred_scaled.reshape(-1, 1)
-            y_pred_reshaped = self.target_scaler.inverse_transform(y_pred_scaled_reshaped)
-            y_pred = y_pred_reshaped.reshape(original_shape)
+            tuner = BayesianOptimization(**common_tuner_params, max_trials=max_trials, executions_per_trial=1)
 
-        if y_seq.ndim == 2:
-            y_true = self.target_scaler.inverse_transform(y_seq)
-        else:
-            original_shape = y_seq.shape
-            y_seq_reshaped = y_seq.reshape(-1, 1)
-            y_true_reshaped = self.target_scaler.inverse_transform(y_seq_reshaped)
-            y_true = y_true_reshaped.reshape(original_shape)
+        tuner.search_space_summary()
+        print(f"Starting HP search with strategy: {strategy}")
+        search_callbacks = [EarlyStopping(monitor='val_loss' if val_data_processed else 'loss', patience=10, verbose=1)]
+        tuner.search(X_train_seq, y_train_seq, epochs=epochs_per_trial, batch_size=32,
+                     validation_data=val_data_processed, callbacks=search_callbacks, verbose=1)
 
-        # Calcula las métricas de evaluación
-        self.metrics = evaluate_regression(y_true.flatten(), y_pred.flatten())
+        best_hps_list = tuner.get_best_hyperparameters(num_trials=1)
+        if not best_hps_list: raise ValueError("Keras Tuner found no best HPs.")
+        self.best_hyperparameters = best_hps_list[0].values
+        print(f"Best HPs: {self.best_hyperparameters}")
+
+        self.units = self.best_hyperparameters.get('units', self.units)
+        self.layers = self.best_hyperparameters.get('layers', self.layers)
+        self.dropout_rate = self.best_hyperparameters.get('dropout_rate', self.dropout_rate)
+        self.learning_rate = self.best_hyperparameters.get('learning_rate', self.learning_rate)
+
+        self.model = tuner.hypermodel.build(best_hps_list[0])
+        print("Retraining model with best HPs...")
+        final_epochs = epochs_per_trial + 50 if epochs_per_trial < 100 else epochs_per_trial * 2
+        self.fit(train_df, target_col, validation_df, epochs=final_epochs, batch_size=32, verbose=1)
+        return self
+
+    def evaluate(self, test_df, target_col='Close'):
+        if self.model is None: raise ValueError("Model not trained or loaded.")
+        X_test_scaled, y_test_scaled = self.preprocess_data(test_df, target_col, is_training=False)
+        if len(X_test_scaled) <= self.n_lags:
+            print(f"Warning: Test data too short for {self.n_lags} lags. Metrics will be NaN.")
+            self.metrics = {metric: np.nan for metric in ['MSE', 'RMSE', 'MAE', 'MAPE']}
+            return self.metrics
+        X_test_seq, y_test_seq = self.sequence_generator.create_sequences(X_test_scaled, y_test_scaled)
+        if X_test_seq.shape[0] == 0:
+            print("Warning: No sequences from test data for evaluation. Metrics will be NaN.")
+            self.metrics = {metric: np.nan for metric in ['MSE', 'RMSE', 'MAE', 'MAPE']}
+            return self.metrics
+        y_pred_scaled = self.model.predict(X_test_seq, verbose=0)
+        y_pred_original_scale = self.target_scaler.inverse_transform(y_pred_scaled)
+        y_true_original_scale = self.target_scaler.inverse_transform(y_test_seq)
+        self.metrics = evaluate_regression(y_true_original_scale.flatten(), y_pred_original_scale.flatten())
         return self.metrics
 
-    def predict_future(self, last_sequence, forecast_horizon=None):
-        """
-        Recursive prediction of future values.
+    def predict_future(self, historical_data_df, forecast_horizon, target_col='Close'):
+        if self.model is None: raise ValueError("Model not trained or loaded.")
+        if not hasattr(self.feature_scaler, 'mean_'): raise ValueError("Feature scaler not fitted.")
+        if not hasattr(self.target_scaler, 'mean_'): raise ValueError("Target scaler not fitted.")
 
-        Args:
-            last_sequence (array-like): The most recent sequence of data
-            forecast_horizon (int, optional): Number of steps to forecast
+        current_data_df = historical_data_df.copy()
+        predictions_unscaled_list = []
+        for i in range(forecast_horizon):
+            processed_for_step_df = self.prepare_data(current_data_df, target_col)
+            if len(processed_for_step_df) < self.n_lags:
+                raise ValueError(
+                    f"Step {i + 1}/{forecast_horizon}: Processed data too short ({len(processed_for_step_df)} rows) for {self.n_lags} lags.")
+            latest_features_df = processed_for_step_df.iloc[-self.n_lags:]
+            if target_col not in latest_features_df.columns:
+                raise ValueError(f"Target column '{target_col}' missing in latest_features_df during predict_future.")
+            X_latest_scaled, _ = self.preprocess_data(latest_features_df, target_col, is_training=False)
+            if X_latest_scaled.shape[0] != self.n_lags:
+                raise ValueError(
+                    f"Step {i + 1}/{forecast_horizon}: Scaled features shape mismatch. Expected {self.n_lags} lags, got {X_latest_scaled.shape[0]}.")
+            input_seq_scaled = X_latest_scaled.reshape(1, self.n_lags, X_latest_scaled.shape[1])
+            prediction_scaled = self.model.predict(input_seq_scaled, verbose=0)[0]
+            prediction_unscaled = self.target_scaler.inverse_transform(prediction_scaled.reshape(-1, 1)).flatten()[0]
+            predictions_unscaled_list.append(prediction_unscaled)
 
-        Returns:
-            array: Future predictions
-        """
-        if forecast_horizon is None:
-            forecast_horizon = self.forecast_horizon
+            last_known_index = current_data_df.index[-1]
+            next_index_val = None
+            if isinstance(last_known_index, pd.Timestamp):
+                inferred_freq = pd.infer_freq(current_data_df.index[-3:]) if len(current_data_df.index) >= 3 else None
+                base_freq = historical_data_df.index.freq
+                current_offset = base_freq if base_freq else (
+                    pd.tseries.frequencies.to_offset(inferred_freq) if inferred_freq else pd.Timedelta(days=1))
+                next_index_val = last_known_index + current_offset
+                if next_index_val.weekday() >= 5 and isinstance(current_offset,
+                                                                pd.offsets.BusinessDay):  # Simple check for BDay
+                    next_index_val = last_known_index + pd.offsets.BusinessDay(n=1)  # Ensure it's a business day
+            elif pd.api.types.is_numeric_dtype(current_data_df.index.dtype):
+                next_index_val = last_known_index + 1
+            else:
+                next_index_val = len(current_data_df)
 
-        # Extraer la última secuencia
-        if isinstance(last_sequence, pd.DataFrame):
-            last_sequence = last_sequence.values
+            new_row_dict = {col: np.nan for col in historical_data_df.columns}
+            new_row_dict[target_col] = prediction_unscaled
+            if 'Open' in new_row_dict and target_col == 'Close' and 'Close' in current_data_df.columns: new_row_dict[
+                'Open'] = current_data_df['Close'].iloc[-1]
+            if 'High' in new_row_dict: new_row_dict['High'] = prediction_unscaled
+            if 'Low' in new_row_dict: new_row_dict['Low'] = prediction_unscaled
+            if 'GreenDay' in new_row_dict and target_col == 'Close' and 'Close' in current_data_df.columns:
+            new_row_dict['GreenDay'] = 1 if prediction_unscaled > current_data_df['Close'].iloc[-1] else 0
 
-        if len(last_sequence.shape) == 1:
-            last_sequence = last_sequence.reshape(1, -1)
+            new_row_df = pd.DataFrame([new_row_dict], index=[next_index_val])
+            new_row_df = new_row_df.reindex(columns=current_data_df.columns)
+            current_data_df = pd.concat([current_data_df, new_row_df])
+            if isinstance(current_data_df.index, pd.DatetimeIndex): current_data_df = current_data_df.sort_index()
+        return np.array(predictions_unscaled_list)
 
-        # Se escala la última secuencia
-        last_sequence_scaled = self.feature_scaler.transform(last_sequence)
-
-        # Reescalar the last sequence
-        input_seq = last_sequence_scaled[-self.n_lags:].reshape(1, self.n_lags, -1)
-
-        # Predicción recursiva
-        predictions = []
-        current_input = input_seq.copy()
-
-        for _ in range(forecast_horizon):
-            next_pred = self.model.predict(current_input, verbose=0)[0]
-
-            if isinstance(next_pred, np.ndarray) and next_pred.size > 1:
-                # Si la predicción es un array, tomar el primer valor
-                next_pred = next_pred[0]
-
-            predictions.append(next_pred)
-
-            # Actualizar la entrada para la siguiente predicción
-            current_input = np.roll(current_input, -1, axis=1)
-            current_input[0, -1, 0] = next_pred  # Assuming target is the first feature
-
-        # Hay que deshacer el escalado de las predicciones
-        predictions_array = np.array(predictions).reshape(-1, 1)
-        predictions_rescaled = self.target_scaler.inverse_transform(predictions_array).flatten()
-
-        return predictions_rescaled
-
-    def plot_training_history(self, history):
-        """
-        Plots the training and validation loss over epochs.
-
-        Args:
-            history (History): The training history object returned by Keras fit method.
-
-        Returns:
-            None
-        """
-
-        if history is None:
-            raise ValueError("Model has not been trained yet.")
-
+    def plot_training_history(self):
+        if self.history is None or not hasattr(self.history, 'history') or not self.history.history:
+            print("No training history available or history is empty.")
+            return
         plt.figure(figsize=(12, 6))
-        plt.plot(history.history['loss'], label='Training Loss')
-        plt.plot(history.history['val_loss'], label='Validation Loss')
-        plt.title('Model Loss Over Epochs')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.legend()
+        if 'loss' in self.history.history:
+            plt.plot(self.history.history['loss'], label='Training Loss')
+        else:
+            print("Warning: 'loss' not in training history.")
+        if 'val_loss' in self.history.history:
+            plt.plot(self.history.history['val_loss'], label='Validation Loss')
+        else:
+            print("Note: 'val_loss' not in training history.")
+        plt.title('Model Loss Over Epochs');
+        plt.xlabel('Epochs');
+        plt.ylabel('Loss');
+        plt.legend();
         plt.show()
 
-    def plot_result(self, y_true, y_pred, title="LSTM Model Predictions"):
-        """
-        Plots the true vs predicted values.
+    def save_model(self, model_path_prefix="models/lstm_model", training_end_date=None):
+        model_dir = os.path.dirname(model_path_prefix)
+        if model_dir and not os.path.exists(model_dir): os.makedirs(model_dir, exist_ok=True)
 
-        Args:
-            y_true (array-like): The true target variable.
-            y_pred (array-like): The predicted values.
-            title (str): Title of the plot.
+        # Guardar en formato .keras
+        model_file = f"{model_path_prefix}.keras"
+        if self.model:
+            self.model.save(model_file)
+            print(f"Keras model saved to {model_file}")
+        else:
+            print(f"Warning: Model is None. Cannot save Keras model to {model_file}")
 
-        Returns:
-            None
-        """
+        scalers_params_file = f"{model_path_prefix}_scalers_params.pkl"
+        with open(scalers_params_file, 'wb') as f:
+            pickle.dump({'feature_scaler': self.feature_scaler, 'target_scaler': self.target_scaler,
+                         'feature_names': self.feature_names, 'n_lags': self.n_lags, 'units': self.units,
+                         'layers': self.layers, 'dropout_rate': self.dropout_rate,
+                         'learning_rate': self.learning_rate, 'model_output_steps': self.model_output_steps,
+                         'best_hyperparameters': self.best_hyperparameters}, f)
+        print(f"Scalers and parameters saved to {scalers_params_file}")
 
-        from Backend.utils.visualizations import plot_predictions
+        metadata = {'n_lags': self.n_lags, 'units': self.units, 'layers': self.layers,
+                    'dropout_rate': self.dropout_rate, 'learning_rate': self.learning_rate,
+                    'model_output_steps': self.model_output_steps,
+                    'metrics': self.metrics if self.metrics else None,
+                    'best_hyperparameters': self.best_hyperparameters if self.best_hyperparameters else None,
+                    'feature_names': self.feature_names if self.feature_names else None,
+                    'timestamp': pd.Timestamp.now().isoformat(), 'training_end_date': training_end_date}
+        metadata_file = f"{model_path_prefix}_metadata.json"
+        with open(metadata_file, 'w') as f:
+            def convert_numpy_types(obj):
+                if isinstance(obj, np.integer): return int(obj)
+                if isinstance(obj, np.floating): return float(obj)
+                if isinstance(obj, np.ndarray): return obj.tolist()
+                if isinstance(obj, dict): return {k: convert_numpy_types(v) for k, v in obj.items()}
+                if isinstance(obj, list): return [convert_numpy_types(i) for i in obj]
+                if pd.isna(obj): return None
+                return obj
 
-        plot_predictions(y_true, y_pred, title)
-
-    def plot_forecast(self, historical_data, forecast_values, target_col="Close", title="LSTM Model Forecast"):
-        """
-        Plots the historical data and forecasted values.
-
-        Args:
-            historical_data (DataFrame): The historical data used for training.
-            forecast_values (array-like): The predicted future values.
-            target_col (str): The name of the target column in the dataset.
-            title (str): Title of the plot.
-
-        Returns:
-            None
-        """
-
-        from Backend.utils.visualizations import plot_forecast
-
-        plot_forecast(historical_data, forecast_values, target_col, title)
-
-    def save_model(self, model_path="models/lstm_model"):
-        """
-        Saves the trained model to a file.
-
-        Args:
-            model_path (str): The path where the model will be saved. (default: "models/lstm_model.h5")
-
-        Returns:
-            None
-        """
-
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-
-        # Se guarda el modelo en formato HDF5 (Keras)
-        self.model.save(f"{model_path}.h5")
-
-        # Se guardan los estados del modelo y los hiperparámetros
-        import pickle
-        with open(f"{model_path}_scalers.pkl", 'wb') as f:
-            pickle.dump({
-                'feature_scaler': self.feature_scaler,
-                'target_scaler': self.target_scaler,
-                'n_lags': self.n_lags,
-                'forecast_horizon': self.forecast_horizon
-            }, f)
-
-        # Metadata del modelo
-        metadata = {
-            'units': self.units,
-            'layers': self.layers,
-            'dropout': self.dropout,
-            'learning_rate': self.learning_rate,
-            'n_lags': self.n_lags,
-            'forecast_horizon': self.forecast_horizon,
-            'metrics': self.metrics,
-            'timestamp': pd.Timestamp.now().isoformat()
-        }
-
-        with open(f"{model_path}_metadata.json", 'w') as f:
-            json.dump({k: str(v) if not isinstance(v, (int, float)) else v
-                       for k, v in metadata.items()}, f, indent=4)
-
-        print(f"Model saved to {model_path}")
-
+            json.dump(convert_numpy_types(metadata), f, indent=4)
+        print(f"Metadata saved to {metadata_file}")
 
     @classmethod
-    def load_model(cls, model_path):
-        """
-        Loads a trained model from a file.
+    def load_model(cls, model_path_prefix):
+        # Cargar desde formato .keras
+        model_file = f"{model_path_prefix}.keras"
+        if not os.path.exists(model_file): raise FileNotFoundError(f"Keras model file not found: {model_file}")
+        # No se necesitan custom_objects para pérdidas/optimizadores estándar con .keras
+        keras_model_loaded = keras_load_model(model_file)
 
-        Args:
-            model_path (str): The path where the model is saved.
-
-        Returns:
-            TimeSeriesLSTMModel: An instance of the class with the loaded model.
-        """
-
-        # Carga el modelo Keras
-        model = load_model(f"{model_path}.h5")
-
-        # Se carga el modelo y los hiperparámetros
-        import pickle
-        with open(f"{model_path}_scalers.pkl", 'rb') as f:
+        scalers_params_file = f"{model_path_prefix}_scalers_params.pkl"
+        if not os.path.exists(scalers_params_file): raise FileNotFoundError(
+            f"Scalers/parameters file not found: {scalers_params_file}")
+        with open(scalers_params_file, 'rb') as f:
             saved_data = pickle.load(f)
 
-        # Se carga la metadata
-        with open(f"{model_path}_metadata.json", 'r') as f:
-            metadata = json.load(f)
-
-        # Crea una nueva instancia de la clase
-        instance = cls(
-            units=metadata['units'],
-            layers=metadata['layers'],
-            dropout=metadata['dropout'],
-            learning_rate=metadata['learning_rate'],
-            n_lags=metadata['n_lags'],
-            forecast_horizon=metadata['forecast_horizon']
-        )
-
-        # Asigna los atributos de la instancia
-        instance.model = model
+        instance = cls(units=saved_data.get('units', 50), layers=saved_data.get('layers', 1),
+                       dropout_rate=saved_data.get('dropout_rate', 0.2),
+                       learning_rate=saved_data.get('learning_rate', 0.001),
+                       n_lags=saved_data['n_lags'])
+        instance.model = keras_model_loaded
         instance.feature_scaler = saved_data['feature_scaler']
         instance.target_scaler = saved_data['target_scaler']
-        instance.n_lags = saved_data['n_lags']
-        instance.forecast_horizon = saved_data['forecast_horizon']
+        instance.feature_names = saved_data.get('feature_names')
+        instance.model_output_steps = saved_data.get('model_output_steps', 1)
+        instance.best_hyperparameters = saved_data.get('best_hyperparameters')
 
-        # Si la metadata contiene nombres de características, los asigna
-        if 'metrics' in metadata:
-            instance.metrics = metadata['metrics']
-
+        metadata_file = f"{model_path_prefix}_metadata.json"
+        if os.path.exists(metadata_file):
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+            instance.metrics = metadata.get('metrics', {})
+            if instance.feature_names is None: instance.feature_names = metadata.get('feature_names')
+        else:
+            print(f"Warning: Metadata file not found at {metadata_file}. Metrics will be empty.")
+            instance.metrics = {}
+        print(f"TimeSeriesLSTMModel loaded from prefix: {model_path_prefix}")
         return instance
+
+
+class LSTMHyperModel(HyperModel):
+    def __init__(self, n_lags, n_features, model_output_steps, **kwargs):
+        self.n_lags = n_lags
+        self.n_features = n_features
+        self.model_output_steps = model_output_steps
+        self.initial_layers = kwargs.get('layers', 1)
+        self.initial_units = kwargs.get('units', 50)
+        self.initial_dropout_rate = kwargs.get('dropout_rate', 0.2)
+        self.initial_learning_rate = kwargs.get('learning_rate', 0.001)
+
+    def build(self, hp):
+        model = Sequential()
+        hp_layers = hp.Int('layers', min_value=1, max_value=3, default=self.initial_layers)
+        hp_units = hp.Int('units', min_value=32, max_value=128, step=32, default=self.initial_units)
+        hp_dropout = hp.Float('dropout_rate', min_value=0.1, max_value=0.5, step=0.1, default=self.initial_dropout_rate)
+        for i in range(hp_layers):
+            return_sequences = i < hp_layers - 1
+            if i == 0:
+                model.add(
+                    LSTM(units=hp_units, return_sequences=return_sequences, input_shape=(self.n_lags, self.n_features)))
+            else:
+                model.add(LSTM(units=hp_units, return_sequences=return_sequences))
+            model.add(BatchNormalization())
+            model.add(Dropout(hp_dropout))
+        model.add(Dense(self.model_output_steps))
+        hp_learning_rate = hp.Choice('learning_rate', values=[1e-2, 1e-3, 1e-4], default=self.initial_learning_rate)
+        # Usar el objeto de función para la pérdida y métricas
+        model.compile(optimizer=Adam(learning_rate=hp_learning_rate),
+                      loss=tf.keras.losses.MeanSquaredError(),
+                      metrics=[tf.keras.metrics.MeanAbsoluteError()])
+        return model
