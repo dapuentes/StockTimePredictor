@@ -489,44 +489,23 @@ def split_data_universal(data: pd.DataFrame,
                          train_size: float = 0.8,
                          target_col: str = 'Close',
                          shuffle: bool = False,
-                         random_state: int = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-    """Universal data splitting function."""
+                         random_state: int = None,
+                         n_splits: int = 5) -> list:
+    """Universal data splitting function using TimeSeriesSplit."""
     try:
         if not isinstance(data, pd.DataFrame):
             raise ValueError("Input must be a pandas DataFrame")
 
-        if not (0 < train_size < 1):
-            raise ValueError("train_size must be between 0 and 1")
-
         if target_col not in data.columns:
             raise ValueError(f"Target column '{target_col}' not found in DataFrame")
 
-        data_copy = data.copy()
+        X = data.drop(columns=[target_col])
+        y = data[target_col]
 
-        # Shuffle if requested (not recommended for time series)
-        if shuffle:
-            data_copy = data_copy.sample(frac=1, random_state=random_state)
+        from sklearn.model_selection import TimeSeriesSplit
+        tscv = TimeSeriesSplit(n_splits=n_splits)
 
-        # Split the data
-        train_size_index = int(len(data_copy) * train_size)
-
-        # Ensure we have at least some samples in both sets
-        train_size_index = max(1, min(train_size_index, len(data_copy) - 2))
-
-        # Split features and target
-        X = data_copy.drop(columns=[target_col])
-        y = data_copy[target_col]
-
-        # Split into training and testing sets
-        X_train, X_test = X[:train_size_index], X[train_size_index:]
-        y_train, y_test = y[:train_size_index], y[train_size_index:]
-
-        print(f"Data split completed:")
-        print(f"  Training samples: {len(X_train)}")
-        print(f"  Testing samples: {len(X_test)}")
-        print(f"  Features: {X_train.shape[1]}")
-
-        return X_train, X_test, y_train, y_test
+        return list(tscv.split(X, y))
 
     except Exception as e:
         print(f"Error in split_data_universal: {e}")
