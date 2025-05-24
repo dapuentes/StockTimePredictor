@@ -3,7 +3,7 @@ import pandas as pd
 import joblib
 import os
 from tensorflow.keras.models import Sequential, save_model, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.optimizers import Adam
 import kerastuner as kt
 from pandas.tseries.offsets import BDay
@@ -39,14 +39,16 @@ class TimeSeriesLSTMModel:
             units=self.lstm_units,
             return_sequences=True,  # Verdadero porque podríamos apilar otra capa LSTM
         ))
+        model.add(BatchNormalization())  # Normalización por lotes para estabilizar el aprendizaje
         model.add(Dropout(self.dropout_rate))
 
         # Segunda capa LSTM
         model.add(LSTM(units=self.lstm_units, return_sequences=False))
+        model.add(BatchNormalization())
         model.add(Dropout(self.dropout_rate))
 
         # Capa de salida
-        model.add(Dense(units=25))
+        model.add(Dense(units=25, activation='relu'))  # relu para la capa oculta
         model.add(Dense(units=1))
 
         optimizer = Adam(learning_rate=0.001, clipnorm=1.0)
@@ -76,10 +78,14 @@ class TimeSeriesLSTMModel:
             # Construye el modelo con los hiperparámetros
             model = Sequential()
             model.add(LSTM(units=lstm_units_1, return_sequences=True, input_shape=input_shape))
+            model.add(BatchNormalization())
             model.add(Dropout(dropout_rate_hp))
+
             model.add(LSTM(units=lstm_units_2, return_sequences=False))
+            model.add(BatchNormalization())
             model.add(Dropout(dropout_rate_hp))
-            model.add(Dense(units=25))
+
+            model.add(Dense(units=25, activation='relu'))
             model.add(Dense(units=1))
 
             optimizer = Adam(learning_rate=learning_rate_hp, clipnorm=1.0)  # Mantener clipnorm

@@ -242,6 +242,25 @@ class LSTMPreprocessor(BasePreprocessor):
                 if len(df_result) >= window:
                     df_result[f'volatility_{window}'] = df_result['returns'].rolling(window=window, min_periods=1).std()
 
+            # 1. Ancho de las Bandas de Bollinger (Bollinger Band Width)
+            if len(df_result) >= 20:
+                sma_20 = df_result['Close'].rolling(window=20, min_periods=1).mean()
+                std_20 = df_result['Close'].rolling(window=20, min_periods=1).std()
+                bb_upper = sma_20 + (std_20 * 2)
+                bb_lower = sma_20 - (std_20 * 2)
+                # El ancho como porcentaje del precio medio normaliza la métrica
+                df_result['bb_width'] = (bb_upper - bb_lower) / (sma_20 + 1e-10)
+
+            # 2. Rango Verdadero Promedio (Average True Range - ATR)
+            if 'High' in df_result.columns and 'Low' in df_result.columns:
+                high_low = df_result['High'] - df_result['Low']
+                high_close = np.abs(df_result['High'] - df_result['Close'].shift())
+                low_close = np.abs(df_result['Low'] - df_result['Close'].shift())
+                # True Range es el máximo de estas tres métricas
+                true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                # ATR es la media móvil exponencial del True Range
+                df_result['atr_14'] = true_range.ewm(alpha=1 / 14, adjust=False).mean()
+
             # Volume features (if available) - normalized
             if 'Volume' in df_result.columns:
                 df_result['volume_returns'] = df_result['Volume'].pct_change().fillna(0)
@@ -298,8 +317,8 @@ class LSTMPreprocessor(BasePreprocessor):
     def get_scalers(self):
         """Get appropriate scalers for LSTM."""
         # LSTM benefits from StandardScaler or MinMaxScaler
-        feature_scaler = MinMaxScaler()
-        target_scaler = MinMaxScaler()
+        feature_scaler = StandardScaler()
+        target_scaler = StandardScaler()
         return feature_scaler, target_scaler
 
 
@@ -545,3 +564,4 @@ def scale_data_universal(X_train, X_test, y_train, y_test,
     except Exception as e:
         print(f"Error in scale_data_universal: {e}")
         raise
+
