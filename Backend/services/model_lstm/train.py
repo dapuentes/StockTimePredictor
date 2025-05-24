@@ -1,204 +1,199 @@
 import pandas as pd
 import numpy as np
-import os
 
-from services.model_lstm.lstm_model import TimeSeriesLSTMModel
+# Importar las clases y la fábrica que hemos construido
+from utils.preprocessing import PreprocessorFactory
+from .lstm_model import TimeSeriesLSTMModel
+from utils.preprocessing import split_data_universal, scale_data_universal
 
 
 def train_lstm_model(
         data: pd.DataFrame,
         target_col: str = 'Close',
-        n_lags: int = 10,
-        train_size_ratio: float = 0.8,
-        save_model_path_prefix: str = None,
-        epochs: int = 100,
+        # --- Parámetros del Preprocesador ---
+        sequence_length: int = 60,
+        n_lags: int = 5,
+        # --- Parámetros del Modelo ---
+        lstm_units: int = 50,
+        dropout_rate: float = 0.2,
+        # --- Parámetros de Entrenamiento ---
+        train_size: float = 0.8,  # Proporción para train+validation
+        validation_size: float = 0.1,  # Proporción de train+validation que será para validación
+        epochs: int = 50,
         batch_size: int = 32,
-        use_hyperparameter_optimization: bool = False,
-        hp_strategy: str = "bayesian",  # "random", "bayesian", "hyperband"
-        hp_max_trials: int = 10,
-        hp_epochs_per_trial: int = 50,
-        hp_project_name: str = "lstm_tuning_via_train_script",
-        initial_lstm_units: int = 50,
-        initial_lstm_layers: int = 1,
-        initial_dropout_rate: float = 0.2,
-        initial_learning_rate: float = 0.001
+        optimize_params: bool = True,
+        # ... (resto de parámetros)
+        save_model_path: str = None
 ):
     """
-    Entrena un modelo LSTM para series temporales.
-
-    Args:
-        data (pd.DataFrame): DataFrame de entrada con datos históricos.
-        target_col (str): Nombre de la columna objetivo.
-        n_lags (int): Número de lags a generar como características.
-        train_size_ratio (float): Proporción del dataset para entrenamiento.
-        save_model_path_prefix (str, optional): Prefijo para la ruta donde guardar el modelo.
-                                                Si es None, el modelo no se guarda.
-        epochs (int): Número de épocas para el entrenamiento (si no se usa optimización de HP).
-        batch_size (int): Tamaño del lote para el entrenamiento.
-        use_hyperparameter_optimization (bool): Si es True, realiza optimización de hiperparámetros.
-        hp_strategy (str): Estrategia para Keras Tuner ('random', 'bayesian', 'hyperband').
-        hp_max_trials (int): Máximo de intentos para el tuner.
-        hp_epochs_per_trial (int): Épocas por cada intento del tuner.
-        hp_project_name (str): Nombre del proyecto para Keras Tuner.
-        initial_lstm_units (int): Unidades LSTM iniciales (usadas si no hay optimización o como default en tuner).
-        initial_lstm_layers (int): Capas LSTM iniciales.
-        initial_dropout_rate (float): Tasa de dropout inicial.
-        initial_learning_rate (float): Tasa de aprendizaje inicial.
-
-    Returns:
-        tuple: (
-            TimeSeriesLSTMModel: El modelo LSTM entrenado.
-            list: Nombres de las características utilizadas.
-            np.ndarray: Residuales del conjunto de entrenamiento (y_true - y_pred).
-            list: Fechas correspondientes a los residuales.
-        )
+    Orquesta el preprocesamiento, entrenamiento y guardado de un modelo LSTM
+    con una división robusta de train/validation/test.
     """
-    print(f"--- Iniciando entrenamiento del modelo LSTM para {target_col} ---")
-    print(
-        f"Configuración: n_lags={n_lags}, train_size_ratio={train_size_ratio}, epochs={epochs}, batch_size={batch_size}")
-    print(f"Optimización de Hiperparámetros: {use_hyperparameter_optimization}")
-    if use_hyperparameter_optimization:
-        print(f"Estrategia HP: {hp_strategy}, Max Trials: {hp_max_trials}, Epochs/Trial: {hp_epochs_per_trial}")
+    print("--- Iniciando el Pipeline de Entrenamiento del Modelo LSTM ---")
 
-    # 1. Instanciar el modelo
-    #    Los hiperparámetros pasados aquí pueden ser sobrescritos por Keras Tuner si se usa.
-    model = TimeSeriesLSTMModel(
-        n_lags=n_lags,
-        units=initial_lstm_units,
-        layers=initial_lstm_layers,
-        dropout_rate=initial_dropout_rate,
-        learning_rate=initial_learning_rate
+    # 1. Crear el preprocesador LSTM específico usando la fábrica
+    print(f"1. Creando preprocesador con sequence_length={sequence_length} y n_lags={n_lags}")
+    lstm_preprocessor = PreprocessorFactory.create_preprocessor(
+        'lstm', sequence_length=sequence_length, n_lags=n_lags
     )
-    print("TimeSeriesLSTMModel instanciado.")
 
-    # 2. Preparar datos (ingeniería de características)
-    #    Esto incluye añadir lags y otras características definidas en model.prepare_data()
-    print("Preparando datos (ingeniería de características)...")
-    processed_data_df = model.prepare_data(data.copy(), target_col=target_col)
-    print(f"Datos procesados: {processed_data_df.shape}")
-    # print(processed_data_df.head())
+    # 2. Inyectar el preprocesador en el modelo al crearlo
+    print(f"2. Instanciando modelo LSTM con units={lstm_units} y dropout={dropout_rate}")
+    model = TimeSeriesLSTMModel(
+        preprocessor=lstm_preprocessor,
+        lstm_units=lstm_units,
+        dropout_rate=dropout_rate
+    )
 
-    if processed_data_df.empty:
-        raise ValueError(
-            "Los datos procesados están vacíos. Revisa los datos de entrada y los parámetros de preparación.")
-    if len(processed_data_df) < model.n_lags * 2:  # Necesita suficientes datos para secuencias y división
-        raise ValueError(
-            f"Datos procesados insuficientes ({len(processed_data_df)} filas) para n_lags ({model.n_lags}) y división train/test.")
+    # 3. Preparar las características (features)
+    print("3. Realizando ingeniería de características...")
+    processed_data = model.preprocessor.prepare_data(data, target_col=target_col)
 
-    # 3. Dividir datos en entrenamiento y prueba
-    #    La validación se puede manejar dentro de fit o optimize_hyperparameters
-    train_split_idx = int(len(processed_data_df) * train_size_ratio)
-    train_df = processed_data_df.iloc[:train_split_idx]
-    test_df = processed_data_df.iloc[train_split_idx:]
+    print("\n3.5. Inspeccionando el DataFrame 'processed_data' en busca de valores inválidos...")
+    invalid_cols = []
+    for col in processed_data.columns:
+        if processed_data[col].isnull().any() or np.isinf(processed_data[col]).any():
+            invalid_cols.append(col)
 
-    print(f"Tamaño del DataFrame de entrenamiento: {train_df.shape}")
-    print(f"Tamaño del DataFrame de prueba: {test_df.shape}")
+    if invalid_cols:
+        print(f"   -> ¡ERROR! Se encontraron valores NaN o Inf en las siguientes columnas: {invalid_cols}")
+        # Opcional: imprimir las filas con problemas para más detalle
+        print("   -> Mostrando algunas de las filas problemáticas:")
+        print(processed_data[processed_data.isin([np.nan, np.inf, -np.inf]).any(axis=1)])
+        raise ValueError(f"Procesamiento fallido. Columnas con valores inválidos: {invalid_cols}")
+    else:
+        print("   -> ¡Inspección completada! El DataFrame 'processed_data' está limpio.")
 
-    if train_df.empty or len(train_df) <= model.n_lags:
-        raise ValueError(
-            f"El conjunto de entrenamiento está vacío o es demasiado pequeño ({len(train_df)} filas) después de la división para n_lags ({model.n_lags}).")
-    if test_df.empty or len(test_df) <= model.n_lags:
-        print(
-            f"Advertencia: El conjunto de prueba está vacío o es demasiado pequeño ({len(test_df)} filas) después de la división para n_lags ({model.n_lags}). La evaluación podría no ser significativa.")
+    # 4. Dividir datos en conjuntos de entrenamiento y prueba
+    print(
+        f"4. Dividiendo los datos en {train_size * 100}% para entrenamiento/validación y {(1 - train_size) * 100}% para prueba final.")
+    train_val_data, test_data = np.split(processed_data, [int(len(processed_data) * train_size)])
 
-    # 4. Entrenamiento del modelo
-    if use_hyperparameter_optimization:
-        print("Iniciando optimización de hiperparámetros...")
-        # Keras Tuner necesita un conjunto de validación. Podemos dividir train_df o pasar test_df.
-        # Por simplicidad, Keras Tuner puede usar una fracción de X_train_seq para validación si validation_data no se pasa.
-        # Opcionalmente, podríamos crear un validation_df explícito aquí.
-        # Para este ejemplo, dejaremos que optimize_hyperparameters maneje la división de validación si es necesario.
+    # Dividir el primer bloque de nuevo en Entrenamiento y Validación
+    val_split_index = int(len(train_val_data) * (1 - validation_size))
+    train_data = train_val_data[:val_split_index]
+    validation_data = train_val_data[val_split_index:]
+
+    print(f"   -> Tamaño del conjunto de entrenamiento: {len(train_data)}")
+    print(f"   -> Tamaño del conjunto de validación: {len(validation_data)}")
+    print(f"   -> Tamaño del conjunto de prueba: {len(test_data)}")
+
+    # Separar características y objetivo para los tres conjuntos
+    X_train, y_train = train_data.drop(columns=[target_col]), train_data[target_col]
+    X_val, y_val = validation_data.drop(columns=[target_col]), validation_data[target_col]
+    X_test, y_test = test_data.drop(columns=[target_col]), test_data[target_col]
+    train_index = X_train.index
+
+    # 5. Escalar los datos
+    print("5. Escalando características y variable objetivo...")
+    feature_scaler, target_scaler = model.preprocessor.get_scalers()
+
+    # Ajustar con X_train y transformar los tres
+    X_train_scaled = feature_scaler.fit_transform(X_train)
+    X_val_scaled = feature_scaler.transform(X_val)
+    X_test_scaled = feature_scaler.transform(X_test)
+
+    # Ajustar con y_train y transformar los tres
+    y_train_scaled = target_scaler.fit_transform(y_train.values.reshape(-1, 1))
+    y_val_scaled = target_scaler.transform(y_val.values.reshape(-1, 1))
+    y_test_scaled = target_scaler.transform(y_test.values.reshape(-1, 1))
+
+    model.feature_scaler = feature_scaler
+    model.target_scaler = target_scaler
+
+    # 6. Crear secuencias
+    print(f"6. Creando secuencias de datos con longitud {sequence_length}...")
+    X_train_seq, y_train_seq = model.preprocessor.create_sequences(X_train_scaled, y_train_scaled)
+    X_val_seq, y_val_seq = model.preprocessor.create_sequences(X_val_scaled, y_val_scaled)
+    X_test_seq, y_test_seq = model.preprocessor.create_sequences(X_test_scaled, y_test_scaled)
+    print(f"  -> Forma de secuencias de entrenamiento: X={X_train_seq.shape}, y={y_train_seq.shape}")
+    print(f"  -> Forma de secuencias de validación: X={X_val_seq.shape}, y={y_val_seq.shape}")
+    print(f"  -> Forma de secuencias de prueba: X={X_test_seq.shape}, y={y_test_seq.shape}")
+
+    y_train_actual_for_residuals = y_train.values[sequence_length:]
+    # Y sus fechas correspondientes:
+    residual_dates_train = train_index[sequence_length:]
+
+    # PASO DE DIAGNÓSTICO
+    print("\n6.5. Verificando la integridad de los datos antes del entrenamiento...")
+    if np.isnan(X_train_seq).any() or np.isinf(X_train_seq).any():
+        raise ValueError("Se encontraron valores NaN o Inf en X_train_seq. El preprocesamiento falló.")
+    if np.isnan(y_train_seq).any() or np.isinf(y_train_seq).any():
+        raise ValueError("Se encontraron valores NaN o Inf en y_train_seq. El preprocesamiento falló.")
+    print("   -> ¡Datos de entrenamiento verificados! No contienen NaN ni Inf.")
+
+    # 7. Entrenar el modelo
+    if optimize_params:
+        print("\n7. Iniciando optimización de hiperparámetros (esto puede tardar)...")
         model.optimize_hyperparameters(
-            train_df=train_df,
-            target_col=target_col,
-            validation_df=test_df if not test_df.empty and len(test_df) > model.n_lags else None,
-            # Usar test_df para validación en tuning si es adecuado
-            strategy=hp_strategy,
-            max_trials=hp_max_trials,
-            epochs_per_trial=hp_epochs_per_trial,
-            project_name=hp_project_name
+            X_train_seq, y_train_seq,
+            X_val_seq=X_test_seq,  # Usar el conjunto de prueba real para el tuner
+            y_val_seq=y_test_seq,
+            max_trials=20,  # Aumentar trials
+            search_epochs=15,  # Aumentar épocas de búsqueda
+            final_epochs=epochs  # Usar las épocas definidas para el entrenamiento final
         )
-        print(f"Optimización de hiperparámetros completada. Mejores HPs: {model.best_hyperparameters}")
-        # El modelo ya está reentrenado con los mejores HPs dentro de optimize_hyperparameters
     else:
-        print("Iniciando entrenamiento del modelo (sin optimización de HP)...")
-        model.fit(
-            train_df=train_df,
-            target_col=target_col,
-            validation_df=test_df if not test_df.empty and len(test_df) > model.n_lags else None,
-            # Usar test_df para validación si es adecuado
-            epochs=epochs,
-            batch_size=batch_size,
-            verbose=1
+        print("\n7. Iniciando entrenamiento del modelo con parámetros fijos...")
+        model.fit(  # Este fit ahora usa X_test_seq como validation_data
+            X_train_seq, y_train_seq,
+            epochs=epochs, batch_size=batch_size,
+            validation_data=(X_test_seq, y_test_seq)  # Usar el conjunto de prueba aquí también
         )
-        print("Entrenamiento del modelo completado.")
 
-    # (Opcional) Calcular métricas en el conjunto de entrenamiento para referencia
-    print("Calculando métricas en el conjunto de entrenamiento...")
-    # Necesitamos predecir sobre los datos de entrenamiento para obtener residuales
-    # model.predict() espera un DataFrame que pasará por model.preprocess_data y luego sequence_generator
+    if hasattr(model, 'best_params_') and model.best_params_:
+        print("\n--- Resultados de la Optimización ---")
+        print(f"Mejores hiperparámetros encontrados: {model.best_params_}")
+        print("------------------------------------")
 
-    # Para obtener y_train_true_original y y_train_pred_original para residuales:
-    X_train_scaled_for_residuals, y_train_scaled_for_residuals = model.preprocess_data(train_df, target_col,
-                                                                                       is_training=False)  # is_training=False para no re-ajustar scalers
-    X_train_seq_for_residuals, y_train_seq_true_scaled = model.sequence_generator.create_sequences(
-        X_train_scaled_for_residuals, y_train_scaled_for_residuals)
+    print("\nCalculando residuales del conjunto de entrenamiento...")
+    # 1. Hacer predicciones sobre el conjunto de entrenamiento (secuenciado y escalado)
+    y_train_pred_scaled_seq = model.predict(X_train_seq)
 
-    residuals = np.array([])
-    residual_dates = []
+    # 2. Desescalar las predicciones
+    # y_train_pred_scaled_seq ya tiene la forma (samples, 1) si la última capa Dense es (units=1)
+    y_train_pred_unscaled = model.target_scaler.inverse_transform(y_train_pred_scaled_seq).flatten()
 
-    from utils.evaluation import evaluate_regression
-    if X_train_seq_for_residuals.shape[0] > 0:
-        y_train_pred_scaled = model.model.predict(X_train_seq_for_residuals, verbose=0)
+    # 3. Los valores reales y_train_actual_for_residuals ya están desescalados y tienen la forma correcta
 
-        y_train_pred_original = model.target_scaler.inverse_transform(y_train_pred_scaled).flatten()
-        y_train_true_original = model.target_scaler.inverse_transform(y_train_seq_true_scaled).flatten()
+    # 4. Calcular residuales
+    residuals_train = y_train_actual_for_residuals - y_train_pred_unscaled
 
-        train_metrics = evaluate_regression(y_train_true_original, y_train_pred_original)
-        print(f"Métricas en datos de entrenamiento (después de crear secuencias): {train_metrics}")
+    print(f"  -> Residuales del entrenamiento calculados. Forma: {residuals_train.shape}")
 
-        residuals = y_train_true_original - y_train_pred_original
-        # Las fechas de los residuales corresponden a las fechas de y_train_seq_true_scaled
-        # El DataFrame original para y_train_seq_true_scaled es train_df.
-        # Las secuencias empiezan después de n_lags.
-        # El target y_data[i + self.n_lags] corresponde a la fila i + n_lags del DataFrame original (después de procesado y escalado)
-        # train_df_for_residual_dates = train_df.iloc[model.n_lags : model.n_lags + len(y_train_true_original)]
-        # O de forma más robusta, tomar las últimas N fechas de train_df donde N es len(residuals)
-        if len(residuals) > 0:
-            residual_dates_pd_index = train_df.index[model.n_lags: model.n_lags + len(residuals)]
-            residual_dates = residual_dates_pd_index.strftime('%Y-%m-%d').tolist() if isinstance(
-                residual_dates_pd_index, pd.DatetimeIndex) else residual_dates_pd_index.tolist()
+    # 8. Evaluar el modelo en el conjunto de prueba
+    print("\n8. Evaluando el modelo final en el conjunto de prueba...")
+    model.evaluate(X_test_seq, y_test_seq)
+    print(f"   -> Métricas finales del modelo: {model.metrics}")
+    '''
+    import matplotlib.pyplot as plt
+    import statsmodels.graphics.tsaplots as sgt
 
-        print(f"Calculados {len(residuals)} residuales del entrenamiento.")
-    else:
-        print("No se pudieron generar secuencias del conjunto de entrenamiento para calcular residuales.")
+    residuals_train = np.array(residuals_train)
 
-    # 5. Evaluar el modelo en el conjunto de prueba
-    if not test_df.empty and len(test_df) > model.n_lags:
-        print("Evaluando el modelo en el conjunto de prueba...")
-        test_metrics = model.evaluate(test_df=test_df, target_col=target_col)
-        print(f"Métricas en datos de prueba: {model.metrics}")  # model.metrics se actualiza en model.evaluate()
-    else:
-        print("Conjunto de prueba vacío o demasiado pequeño, omitiendo evaluación.")
-        model.metrics = {metric: np.nan for metric in ['MSE', 'RMSE', 'MAE', 'MAPE']}
+    # --- Gráfico ACF de los Residuales ---
+    plt.figure(figsize=(12, 6))
+    sgt.plot_acf(residuals_train, lags=40, zero=False) # 'lags' es el número de retardos a mostrar
+    plt.title('Función de Autocorrelación (ACF) de los Residuales del Modelo LSTM')
+    plt.xlabel('Retardo (Lag)')
+    plt.ylabel('Autocorrelación')
+    plt.grid(True)
+    plt.show()
 
-    # 6. Guardar el modelo
-    if save_model_path_prefix:
-        print(f"Guardando el modelo en el prefijo: {save_model_path_prefix}...")
-        training_end_date_str = None
-        if isinstance(data.index, pd.DatetimeIndex) and not data.empty:
-            training_end_date_str = data.index[-1].strftime("%Y-%m-%d")
-        elif not data.empty:  # Si no es DatetimeIndex pero hay datos, usa un placeholder o el último índice
-            training_end_date_str = str(data.index[-1])
+    # --- Gráfico PACF de los Residuales ---
+    plt.figure(figsize=(12, 6))
+    sgt.plot_pacf(residuals_train, lags=40, zero=False, method='ols') # 'method' puede variar, 'ols' es común
+    plt.title('Función de Autocorrelación Parcial (PACF) de los Residuales del Modelo LSTM')
+    plt.xlabel('Retardo (Lag)')
+    plt.ylabel('Autocorrelación Parcial')
+    plt.grid(True)
+    plt.show()
+    '''
 
-        model.save_model(model_path_prefix=save_model_path_prefix, training_end_date=training_end_date_str)
-        print("Modelo guardado.")
-    else:
-        print("No se proporcionó save_model_path_prefix, el modelo no se guardará.")
+    # 9. Guardar el modelo si se proporciona una ruta
+    if save_model_path:
+        print(f"\n9. Guardando modelo en: {save_model_path}")
+        model.save_model(save_model_path)
 
-    # 7. Retornar resultados
-    #    feature_names se establece en model.preprocess_data durante el primer escalado (is_training=True)
-    feature_names_from_model = model.feature_names if model.feature_names else []
-
-    print("--- Entrenamiento del modelo LSTM finalizado ---")
-    return model, feature_names_from_model, residuals, residual_dates
+    print("\n--- Pipeline de Entrenamiento LSTM Completado Exitosamente ---")
+    return model, residuals_train, residual_dates_train

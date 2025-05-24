@@ -1,64 +1,52 @@
 import pandas as pd
+from typing import Tuple
+import numpy as np
+from .lstm_model import TimeSeriesLSTMModel
 
-def forecast_future_prices(
-    model,  # Instancia de TimeSeriesLSTMModel entrenada
-    historical_data_df: pd.DataFrame,
-    forecast_horizon: int = 10,
-    target_col: str = 'Close'
-):
+
+def forecast_future_prices_lstm(
+        model: TimeSeriesLSTMModel,
+        data: pd.DataFrame,
+        forecast_horizon: int = 10,
+        target_col: str = 'Close'
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Pronostica precios futuros utilizando un modelo LSTM entrenado.
+    Orquesta la predicción de precios futuros utilizando un modelo LSTM entrenado.
+
+    Esta función actúa como un intermediario, llamando al método `predict_future` del
+    modelo, que contiene la lógica compleja de predicción recursiva y el cálculo
+    de intervalos de confianza mediante Monte Carlo Dropout.
 
     Args:
-        model (TimeSeriesLSTMModel): Instancia del modelo LSTM entrenado.
-        historical_data_df (pd.DataFrame): DataFrame con los datos históricos necesarios
-                                           para generar la última secuencia de entrada para el modelo.
-        forecast_horizon (int): Número de períodos futuros a pronosticar.
-        target_col (str): Nombre de la columna objetivo.
+        model (TimeSeriesLSTMModel): La instancia del modelo LSTM ya entrenado y cargado.
+        data (pd.DataFrame): El DataFrame con los datos históricos necesarios para iniciar el pronóstico.
+        forecast_horizon (int): El número de días/pasos hacia el futuro a predecir.
+        target_col (str): El nombre de la columna objetivo.
 
     Returns:
-        tuple: (
-            np.ndarray: Array con los valores pronosticados.
-            None: Placeholder para límites inferiores (no implementado para LSTM aquí).
-            None: Placeholder para límites superiores (no implementado para LSTM aquí).
-        )
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: Una tupla conteniendo tres arrays de NumPy:
+        - El pronóstico de los puntos principales (predicciones).
+        - Los límites inferiores del intervalo de predicción.
+        - Los límites superiores del intervalo de predicción.
     """
-    print(f"--- Iniciando pronóstico LSTM para los próximos {forecast_horizon} períodos de '{target_col}' ---")
+    print(f"\n--- Iniciando la llamada al pronóstico para los próximos {forecast_horizon} días ---")
 
-    if not hasattr(model, 'predict_future'):
-        raise AttributeError("El objeto 'model' no tiene un método 'predict_future'. Asegúrate de pasar una instancia entrenada de TimeSeriesLSTMModel.")
-    if not isinstance(historical_data_df, pd.DataFrame):
-        raise TypeError("historical_data_df debe ser un DataFrame de pandas.")
-    if historical_data_df.empty:
-        raise ValueError("historical_data_df no puede estar vacío.")
+    # 1. Delegar toda la lógica de pronóstico al método del modelo
+    # Este método ya está diseñado para manejar la recursividad y los intervalos.
+    forecast, lower_bounds, upper_bounds = model.predict_future(
+        historical_data_df=data,
+        forecast_horizon=forecast_horizon,
+        target_col=target_col
+    )
 
-    # El método predict_future del modelo LSTM se encarga de la lógica de predicción recursiva.
-    # Devuelve solo las predicciones puntuales.
-    try:
-        forecast_values = model.predict_future(
-            historical_data_df=historical_data_df.copy(), # Usar una copia para seguridad
-            forecast_horizon=forecast_horizon,
-            target_col=target_col
+    # 2. Imprimir los resultados en la consola para una fácil verificación
+    print(f"\n--- Resultados del Pronóstico (Valores Desescalados) ---")
+    for i in range(forecast_horizon):
+        print(
+            f"Día {i + 1}: "
+            f"Predicción = {forecast[i]:.4f} "
+            f"(Intervalo 95%: [{lower_bounds[i]:.4f} - {upper_bounds[i]:.4f}])"
         )
-        print(f"Pronóstico LSTM para '{target_col}' para los próximos {forecast_horizon} períodos:")
-        if forecast_values is not None and len(forecast_values) > 0:
-            for i, value in enumerate(forecast_values):
-                print(f"Período {i + 1}: {value:.4f}")
-        else:
-            print("No se generaron valores de pronóstico.")
 
-        # Por ahora, no se implementan límites inferiores y superiores para LSTM.
-        lower_bounds = None
-        upper_bounds = None
-
-        print("--- Pronóstico LSTM finalizado ---")
-        return forecast_values, lower_bounds, upper_bounds
-
-    except Exception as e:
-        print(f"Error durante el proceso de pronóstico LSTM: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None, None
-
-
-
+    # 3. Devolver los resultados para que sean procesados por la API
+    return forecast, lower_bounds, upper_bounds
