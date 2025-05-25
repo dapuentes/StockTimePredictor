@@ -1,392 +1,592 @@
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 import numpy as np
 import pandas as pd
-import numpy as np
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional, Dict, List
+import warnings
+from abc import ABC, abstractmethod
 
-def add_lags(df, target_col='Close', n_lags=30):
+
+class BasePreprocessor:
     """
-    Adds lagged versions of a target column to a DataFrame. This function takes a DataFrame, a target
-    column name, and the number of lags to create lagged values for the target column, appending them
-    as new columns to the DataFrame. It returns a DataFrame without any rows containing NaN values
-    resulting from the lag operation. An exception is raised in case of an error during execution.
+    Handles preprocessing of time-series data by adding lag features, technical indicators,
+    temporal features, and performing general dataset preparations.
 
-    Args:
-        df (pandas.DataFrame): The input DataFrame containing the data.
-        target_col (str): The name of the target column to create lags for. Default is 'Close'.
-        n_lags (int): The number of lagged versions of the target column to create. Default is 30.
+    This class provides utility functions to process financial or time-series data,
+    making it ready for machine learning models by augmenting the dataset with
+    various statistical, temporal, and technical features.
 
-    Returns:
-        pandas.DataFrame: A new DataFrame containing the original data and the lagged columns, with
-        rows containing NaN values removed.
-
-    Raises:
-        Exception: If there is an error during the operation, the exception is raised with a
-        descriptive message.
+    Attributes:
+        feature_scaler: Placeholder for feature standardization or normalization scaler.
+        target_scaler: Placeholder for target column standardization or normalization scaler.
+        feature_names: Stores the names of generated features.
     """
-    try:
-        df_copy = df.copy()
-        for lag in range(1, n_lags + 1):
-            df_copy[f'{target_col}_lag_{lag}'] = df_copy[target_col].shift(lag)
-        return df_copy.dropna()
-    except Exception as e:
-        print(f"Error in add_lags: {e}")
-        raise
 
-def add_technical_indicators(df):
-    """
-        Adds various technical indicators and feature engineering to a dataframe.
+    def __init__(self):
+        self.feature_scaler = None
+        self.target_scaler = None
+        self.feature_names = None
 
-        This function calculates multiple technical indicators including moving averages,
-        Relative Strength Index (RSI), Bollinger Bands, Moving Average Convergence Divergence (MACD),
-        and other features relevant for technical analysis in trading. It also adds additional
-        features derived from volatility, volume, and price-to-multiple moving average ratios.
-        These indicators are appended as new columns to the input dataframe.
+    def add_lags(self, df, target_col='Close', n_lags=30):
+        """Universal lag feature creation."""
+        try:
+            if target_col not in df.columns:
+                raise ValueError(f"Target column '{target_col}' not found in DataFrame")
 
-        Parameters:
-        df : pandas.DataFrame
-            The input dataframe containing historical price data. The dataframe must include
-            at least the 'Close' column. For volume-related features, the 'Volume' column is
-            also required. Additional features such as trend calculations need a 'GreenDay'
-            column to be present.
+            df_copy = df.copy()
 
-        Returns:
-        pandas.DataFrame
-            A dataframe with the same original columns plus additional columns containing
-            technical indicators and engineered features.
+            if len(df_copy) <= n_lags:
+                warnings.warn(f"DataFrame has only {len(df_copy)} rows, but {n_lags} lags requested")
+                n_lags = max(1, len(df_copy) - 1)
 
-        Raises:
-        Exception
-            If any error occurs during the computation of technical indicators or feature
-            engineering, an exception will be raised and details will be logged with the
-            error message.
-    """
-    try:
-        # Moving averages
-        df['SMA_5'] = df['Close'].rolling(window=5).mean()
-        df['SMA_20'] = df['Close'].rolling(window=20).mean()
-        df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
-        df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
-        
-        # RSI
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # Bollinger Bands
-        df['20d_std'] = df['Close'].rolling(window=20).std()
-        df['upper_band'] = df['SMA_20'] + (df['20d_std'] * 2)
-        df['lower_band'] = df['SMA_20'] - (df['20d_std'] * 2)
-        
-        # MACD
-        df['MACD'] = df['EMA_12'] - df['EMA_26']
-        df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        
-        # Volatility
-        df['volatility'] = df['Close'].rolling(window=20).std() / df['Close'].rolling(window=20).mean()
-        
-        # Volume features
-        if 'Volume' in df.columns:
-            df['volume_change'] = df['Volume'].pct_change()
-            df['volume_ma'] = df['Volume'].rolling(window=10).mean()
-            df['volume_ratio'] = df['Volume'] / df['volume_ma']
-        
-        # Price to moving average ratios
-        for horizon in [2, 5, 60, 250]:
-            rolling_averages = df['Close'].rolling(window=horizon).mean()
-            df[f'Close_ratio_{horizon}d_MA'] = df['Close'] / rolling_averages
-            
-            # Trend features
-            df[f'Trend_{horizon}d_MA'] = df['GreenDay'].shift(1).rolling(window=horizon).sum()
-        
-        return df
-    except Exception as e:
-        print(f"Error in add_technical_indicators: {e}")
-        raise
+            for lag in range(1, n_lags + 1):
+                df_copy[f'{target_col}_lag_{lag}'] = df_copy[target_col].shift(lag)
 
-def add_seasonal_features(df):
-    """
-        Adds seasonal features such as day of the week, month, quarter, and one-hot
-        encoded representations of these features to the given DataFrame. The
-        function ensures that the DataFrame index is a DatetimeIndex before
-        extracting features. Day_of_week and month are one-hot coded for more
-        granular analysis.
+            result = df_copy.dropna()
+            if len(result) == 0:
+                raise ValueError("All rows were dropped after adding lags. Consider reducing n_lags.")
 
-        Parameters:
-        df: pd.DataFrame
-            Input DataFrame with a DatetimeIndex or an index convertible to
-            DatetimeIndex.
+            return result
+        except Exception as e:
+            print(f"Error in add_lags: {e}")
+            raise
 
-        Returns:
-        pd.DataFrame
-            The updated DataFrame containing the original data along with added
-            seasonal features such as day_of_week, month, quarter, and one-hot
-            encoded columns.
+    def add_basic_technical_indicators(self, df):
+        """Core technical indicators used by all models."""
+        try:
+            df_result = df.copy()
 
-        Raises:
-        Exception
-            If an error occurs during processing while ensuring index format or
-            adding features, an exception will be raised with additional logging
-            for debugging.
-    """
-    try:
-        # Ensure index is datetime
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index)
-        
-        df['day_of_week'] = df.index.dayofweek
-        df['month'] = df.index.month
-        df['quarter'] = df.index.quarter
-        
-        # One-hot encode day of week and month
-        for day in range(5):  # 0-4 for weekdays
-            df[f'day_{day}'] = (df['day_of_week'] == day).astype(int)
-        
-        for month in range(1, 13):
-            df[f'month_{month}'] = (df['month'] == month).astype(int)
-        
-        return df
-    except Exception as e:
-        print(f"Error in add_seasonal_features: {e}")
-        raise
+            if 'Close' not in df_result.columns:
+                raise ValueError("'Close' column is required")
 
-def feature_engineering(data, custom_horizons=None, incluide_seasonal=False):
-    """
-    Perform feature engineering on financial time-series data.
+            # Essential moving averages
+            for window in [5, 10, 20, 50]:
+                if len(df_result) >= window:
+                    df_result[f'SMA_{window}'] = df_result['Close'].rolling(window=window, min_periods=1).mean()
 
-    This function generates a set of predictive features from the provided data,
-    based on rolling averages, trends, and additional techniques such as lagged
-    values and technical indicators. Optionally, seasonal features can also be
-    added. It validates input data for required columns and utilizes horizon
-    values for calculating derived features. Missing data is handled by dropping
-    rows with NaN values after feature calculation.
+            # Exponential moving averages
+            for span in [12, 26]:
+                df_result[f'EMA_{span}'] = df_result['Close'].ewm(span=span, adjust=False).mean()
 
-    Parameters:
-        data (pandas.DataFrame): The input time-series data. Must include the 'Close'
-           column, and optionally 'GreenDay' for trend calculations.
-        custom_horizons (list[int], optional): Custom time horizons for feature
-           calculation. Defaults to `[2, 5, 60, 250]` if not provided.
-        incluide_seasonal (bool): Flag to indicate whether seasonal features should
-           be added to the data. Defaults to `False`.
+            # RSI
+            if len(df_result) >= 14:
+                delta = df_result['Close'].diff()
+                gain = delta.where(delta > 0, 0).rolling(window=14, min_periods=1).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
+                rs = gain / (loss + 1e-10)
+                df_result['RSI'] = 100 - (100 / (1 + rs))
+            else:
+                df_result['RSI'] = 50.0
 
-    Returns:
-        pandas.DataFrame: A new DataFrame containing the original features along
-           with newly generated features.
+            # Basic volatility
+            if len(df_result) >= 20:
+                df_result['volatility_20d'] = (
+                        df_result['Close'].rolling(window=20, min_periods=1).std() /
+                        (df_result['Close'].rolling(window=20, min_periods=1).mean() + 1e-10)
+                )
 
-    Raises:
-        ValueError: If one or more required columns are missing from the input data.
-        Exception: For any other errors encountered during feature engineering.
-    """
-    try:
-        # Use custom horizons if provided, otherwise use default
-        horizons = custom_horizons or [2, 5, 60, 250]
-        
-        # Ensure data is a copy to avoid modifying original
-        data = data.copy()
-        
-        # Validate required columns
-        #required_columns = ['Close', 'Volume', 'GreenDay']
-        required_columns = ['Close']
-        for col in required_columns:
-            if col not in data.columns:
-                raise ValueError(f"Missing required column: {col}")
-        
-        # Prepare new predictors
-        new_predictors = []
-        for horizon in horizons:
-            rolling_averages = data['Close'].rolling(window=horizon).mean()
-            ratio_column = f'Close_ratio_{horizon}d MA'
-            data[ratio_column] = data['Close'] / rolling_averages
-            trend_column = f'Trend_{horizon}d MA'
-            data[trend_column] = data['GreenDay'].shift(1).rolling(window=horizon).sum()
-            new_predictors.extend([ratio_column, trend_column])
-        
-        # Add features
-        data = add_lags(data, target_col='Close', n_lags=10)
-        data = add_technical_indicators(data)
+            # Price changes
+            for period in [1, 5, 10]:
+                if len(df_result) > period:
+                    df_result[f'price_change_{period}d'] = df_result['Close'].pct_change(periods=period).fillna(0)
 
-        # Optional: Add seasonal features
-        if incluide_seasonal:
-            data = add_seasonal_features(data)
-        
-        # Drop rows with NaN values
-        data = data.dropna()
-        
-        return data
-    
-    except Exception as e:
-        print(f"Error in feature_engineering: {e}")
-        raise
+            return df_result
 
-def scale_data(X_train, X_test, y_train, y_test, feature_scaler=None, target_scaler=None):
-    """
-        Scales training and testing data using provided or default scalers.
+        except Exception as e:
+            print(f"Error in add_basic_technical_indicators: {e}")
+            raise
 
-        This function applies scaling to both the feature and target datasets for
-        training and testing. By default, it uses MinMaxScaler unless other scalers
-        are provided. The feature and target scalers are applied separately.
+    def add_temporal_features(self, df):
+        """Basic temporal features for all models."""
+        try:
+            df_result = df.copy()
 
-        Args:
-            X_train: array-like of shape (n_samples, n_features)
-                Training feature data to be scaled.
-            X_test: array-like of shape (n_samples, n_features)
-                Testing feature data to be scaled.
-            y_train: array-like of shape (n_samples, n_targets) or (n_samples,)
-                Training target data to be scaled.
-            y_test: array-like of shape (n_samples, n_targets) or (n_samples,)
-                Testing target data to be scaled.
-            feature_scaler: object implementing the scikit-learn scaler API, optional
-                A scaler instance to be used for feature scaling. If None,
-                MinMaxScaler will be used.
-            target_scaler: object implementing the scikit-learn scaler API, optional
-                A scaler instance to be used for target scaling. If None,
-                MinMaxScaler will be used.
+            if not isinstance(df_result.index, pd.DatetimeIndex):
+                try:
+                    df_result.index = pd.to_datetime(df_result.index)
+                except:
+                    print("Warning: Could not convert index to datetime. Skipping temporal features.")
+                    return df_result
 
-        Returns:
-            tuple
-                A tuple containing scaled feature and target datasets for training
-                and testing, followed by the feature_scaler and target_scaler.
-                The format of the tuple is as follows:
-                (X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled,
-                feature_scaler, target_scaler)
+            # Basic time features
+            df_result['day_of_week'] = df_result.index.dayofweek
+            df_result['month'] = df_result.index.month
+            df_result['quarter'] = df_result.index.quarter
+            df_result['day_of_month'] = df_result.index.day
 
-        Raises:
-            Exception:
-                Raises an exception in case of any errors during the scaling
-                process, providing the error details.
-    """
-    try:
-        # Use RobustScaler to handle outliers
-        if feature_scaler is None:
-            feature_scaler = MinMaxScaler()
-        
-        if target_scaler is None:
-            target_scaler = MinMaxScaler()
-        
-        # Fit and transform feature scaler
-        X_train_scaled = feature_scaler.fit_transform(X_train)
-        X_test_scaled = feature_scaler.transform(X_test)
-        
-        # Fit and transform target scaler
-        y_train_scaled = target_scaler.fit_transform(y_train)
-        y_test_scaled = target_scaler.transform(y_test)
-        
-        return X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler
-    
-    except Exception as e:
-        print(f"Error in scale_data: {e}")
-        raise
+            # Cyclical encoding (better for ML)
+            df_result['day_of_week_sin'] = np.sin(2 * np.pi * df_result['day_of_week'] / 7)
+            df_result['day_of_week_cos'] = np.cos(2 * np.pi * df_result['day_of_week'] / 7)
+            df_result['month_sin'] = np.sin(2 * np.pi * df_result['month'] / 12)
+            df_result['month_cos'] = np.cos(2 * np.pi * df_result['month'] / 12)
 
-def split_data(data: pd.DataFrame, 
-               train_size: float = 0.8, 
-               shuffle: bool = False, 
-               random_state: int = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-    """
-    Splits a pandas DataFrame into training and testing datasets, separating features from the target column.
+            return df_result
 
-    This function takes in a pandas DataFrame and splits it into training and testing sets based on a
-    specified split ratio. It ensures the target variable ('Close' column) is separated from the feature
-    columns. Optionally, the data can be shuffled before splitting. The function also preserves the
-    original data by working on a copy.
+        except Exception as e:
+            print(f"Error in add_temporal_features: {e}")
+            return df
 
-    Arguments:
-        data (pd.DataFrame): Input DataFrame containing both features and a target 'Close' column.
-        train_size (float, optional): Proportion of the data to be used for training. Must be a value
-            between 0 and 1. Defaults to 0.8.
-        shuffle (bool, optional): Whether to shuffle the DataFrame before splitting. Defaults to False.
-        random_state (int, optional): Seed for the random number generator used when shuffle is True.
-            Ensures reproducibility. Defaults to None.
+    def prepare_base_features(self, data, target_col='Close'):
+        """Common feature preparation for all models."""
+        try:
+            data_result = data.copy()
 
-    Returns:
-        Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]: A tuple containing the training features,
-            testing features, training target series, and testing target series, respectively.
-    """
-    try:
-        # Validate input
-        if not isinstance(data, pd.DataFrame):
-            raise ValueError("Input must be a pandas DataFrame")
-        
-        if not (0 < train_size < 1):
-            raise ValueError("train_size must be between 0 and 1")
-        
-        # Ensure 'Close' column exists
-        if 'Close' not in data.columns:
-            raise ValueError("DataFrame must contain a 'Close' column")
-        
-        # Create a copy to avoid modifying the original data
-        data_copy = data.copy()
-        
-        # Shuffle if requested
-        if shuffle:
-            data_copy = data_copy.sample(frac=1, random_state=random_state)
-        
-        # Split the data
-        train_size_index = int(len(data_copy) * train_size)
-        
-        # Split features and target
-        X = data_copy.drop(columns=['Close'])
-        y = data_copy['Close']
-        
-        # Split into training and testing sets
-        X_train, X_test = X[:train_size_index], X[train_size_index:]
-        y_train, y_test = y[:train_size_index], y[train_size_index:]
-        
-        return X_train, X_test, y_train, y_test
-    
-    except Exception as e:
-        print(f"Error in split_data: {e}")
-        raise
+            # Ensure GreenDay exists
+            if 'GreenDay' not in data_result.columns:
+                data_result['GreenDay'] = (data_result['Close'] > data_result['Close'].shift(1)).astype(int)
 
-def create_sequences(X: Union[np.ndarray, pd.DataFrame], 
-                     y: Union[np.ndarray, pd.Series], 
-                     time_steps: int = 10) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Create sequences of data for time series processing.
+            # Add basic technical indicators
+            data_result = self.add_basic_technical_indicators(data_result)
 
-    This function takes input features (X) and corresponding targets/labels
-    (y), and generates sequences based on a given number of time_steps. Each
-    sequence in X_seq corresponds to `time_steps` consecutive entries in X,
-    and the corresponding value in y_seq is the target after the
-    time_steps.
+            # Add temporal features
+            data_result = self.add_temporal_features(data_result)
 
-    Parameters:
-        X: Union[np.ndarray, pd.DataFrame]
-            Input feature data. Must be convertible to a numpy array.
-        y: Union[np.ndarray, pd.Series]
-            Corresponding target values. Must be convertible to a numpy array.
-        time_steps: int
-            Number of consecutive entries to form a single sequence.
+            # Fill NaN values
+            data_result = data_result.ffill().bfill().fillna(0)
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray]
-            A tuple of two numpy arrays - X_seq and y_seq:
-            - X_seq contains sequences of shape (len(X) - time_steps, time_steps, features).
-            - y_seq contains the corresponding targets of shape (len(X) - time_steps,).
+            return data_result
 
-    Raises:
-        ValueError
-            If the length of X is less than or equal to the specified time_steps.
-        Exception
-            For other unexpected errors encountered during the process.
-    """
-    try:
-        # Convert to numpy arrays if not already
+        except Exception as e:
+            print(f"Error in prepare_base_features: {e}")
+            raise
+
+
+class RandomForestPreprocessor(BasePreprocessor):
+    """Preprocessor optimized for Random Forest models."""
+
+    def __init__(self, n_lags=10, horizons=None, use_robust_scaling=False):
+        super().__init__()
+        self.n_lags = n_lags
+        self.horizons = horizons or [2, 5, 10, 20, 60]
+        self.use_robust_scaling = use_robust_scaling
+
+    def add_rf_specific_features(self, df):
+        """Features that work well with Random Forest."""
+        try:
+            df_result = df.copy()
+
+            # Price ratios and trend features (RF loves these)
+            for horizon in self.horizons:
+                if len(df_result) > horizon:
+                    rolling_averages = df_result['Close'].rolling(window=horizon, min_periods=1).mean()
+                    df_result[f'Close_ratio_{horizon}d_MA'] = df_result['Close'] / (rolling_averages + 1e-10)
+                    df_result[f'Trend_{horizon}d_MA'] = df_result['GreenDay'].shift(1).rolling(
+                        window=horizon, min_periods=1
+                    ).sum()
+                    df_result[f'momentum_{horizon}d'] = df_result['Close'] / df_result['Close'].shift(horizon) - 1
+
+            # Bollinger Bands and advanced indicators
+            if 'SMA_20' in df_result.columns:
+                bb_std = df_result['Close'].rolling(window=20, min_periods=1).std()
+                df_result['BB_upper'] = df_result['SMA_20'] + (bb_std * 2)
+                df_result['BB_lower'] = df_result['SMA_20'] - (bb_std * 2)
+                df_result['BB_position'] = (df_result['Close'] - df_result['BB_lower']) / (
+                            df_result['BB_upper'] - df_result['BB_lower'] + 1e-10)
+
+            # MACD
+            if 'EMA_12' in df_result.columns and 'EMA_26' in df_result.columns:
+                df_result['MACD'] = df_result['EMA_12'] - df_result['EMA_26']
+                df_result['MACD_signal'] = df_result['MACD'].ewm(span=9, adjust=False).mean()
+                df_result['MACD_histogram'] = df_result['MACD'] - df_result['MACD_signal']
+
+            # Volume features (if available)
+            if 'Volume' in df_result.columns:
+                df_result['volume_change'] = df_result['Volume'].pct_change().fillna(0)
+                for window in [5, 10, 20]:
+                    if len(df_result) >= window:
+                        volume_ma = df_result['Volume'].rolling(window=window, min_periods=1).mean()
+                        df_result[f'volume_ratio_{window}d'] = df_result['Volume'] / (volume_ma + 1e-10)
+
+            return df_result
+
+        except Exception as e:
+            print(f"Error in add_rf_specific_features: {e}")
+            raise
+
+    def prepare_data(self, data, target_col='Close'):
+        """Complete preprocessing for Random Forest."""
+        # Base features
+        data_processed = self.prepare_base_features(data, target_col)
+
+        # Add lags
+        data_processed = self.add_lags(data_processed, target_col, self.n_lags)
+
+        # Add RF-specific features
+        data_processed = self.add_rf_specific_features(data_processed)
+
+        print(f"RF preprocessing completed. Shape: {data_processed.shape}")
+        return data_processed
+
+    def get_scalers(self):
+        """Get appropriate scalers for RF."""
+        feature_scaler = RobustScaler() if self.use_robust_scaling else MinMaxScaler()
+        target_scaler = MinMaxScaler()  # Always MinMax for target
+        return feature_scaler, target_scaler
+
+
+class LSTMPreprocessor(BasePreprocessor):
+    """Preprocessor optimized for LSTM models."""
+
+    def __init__(self, sequence_length=60, n_lags=5):
+        super().__init__()
+        self.sequence_length = sequence_length
+        self.n_lags = n_lags
+        self.price_col = None
+
+    def add_lstm_specific_features(self, df):
+        """Features that work well with LSTM (fewer, more stationary)."""
+        try:
+            df_result = df.copy()
+
+            # LSTM prefers normalized/stationary features
+            # Returns instead of raw prices
+            df_result['returns'] = df_result[self.price_col].pct_change().fillna(0)
+            df_result['log_returns'] = np.log(df_result[self.price_col] / df_result[self.price_col].shift(1)).fillna(0)
+
+            # Simple moving average ratios (LSTM can learn complex patterns)
+            for window in [5, 20]:
+                if len(df_result) >= window:
+                    ma = df_result[self.price_col].rolling(window=window, min_periods=1).mean()
+                    df_result[f'price_ma_ratio_{window}'] = df_result[self.price_col] / (ma + 1e-10)
+
+            # Volatility features (important for LSTM)
+            for window in [5, 10, 20]:
+                if len(df_result) >= window:
+                    df_result[f'volatility_{window}'] = df_result['returns'].rolling(window=window, min_periods=1).std()
+
+            # 1. Ancho de las Bandas de Bollinger (Bollinger Band Width)
+            if len(df_result) >= 20:
+                sma_20 = df_result['Close'].rolling(window=20, min_periods=1).mean()
+                std_20 = df_result['Close'].rolling(window=20, min_periods=1).std()
+                bb_upper = sma_20 + (std_20 * 2)
+                bb_lower = sma_20 - (std_20 * 2)
+                # El ancho como porcentaje del precio medio normaliza la métrica
+                df_result['bb_width'] = (bb_upper - bb_lower) / (sma_20 + 1e-10)
+
+            # 2. Rango Verdadero Promedio (Average True Range - ATR)
+            if 'High' in df_result.columns and 'Low' in df_result.columns:
+                high_low = df_result['High'] - df_result['Low']
+                high_close = np.abs(df_result['High'] - df_result['Close'].shift())
+                low_close = np.abs(df_result['Low'] - df_result['Close'].shift())
+                # True Range es el máximo de estas tres métricas
+                true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                # ATR es la media móvil exponencial del True Range
+                df_result['atr_14'] = true_range.ewm(alpha=1 / 14, adjust=False).mean()
+
+            # Volume features (if available) - normalized
+            if 'Volume' in df_result.columns:
+                df_result['volume_returns'] = df_result['Volume'].pct_change().fillna(0)
+                volume_ma = df_result['Volume'].rolling(window=20, min_periods=1).mean()
+                df_result['volume_normalized'] = df_result['Volume'] / (volume_ma + 1e-10)
+
+            return df_result
+
+        except Exception as e:
+            print(f"Error in add_lstm_specific_features: {e}")
+            raise
+
+    def prepare_data(self, data, target_col='Close'):
+        """Complete preprocessing for LSTM."""
+        # Guardar el nombre de la columna de precio
+        self.price_col = target_col
+
+        # Crear una copia para evitar modificar el DataFrame original
+        data_processed = data.copy()
+
+        # Base features (minimal)
+        data_processed = self.prepare_base_features(data_processed, self.price_col)
+
+        #  Crear características específicas de LSTM ANTES de los lags
+        # Esto incluye 'log_returns' que será nuestro objetivo
+        data_processed = self.add_lstm_specific_features(data_processed)
+
+        # Definir la columna objetivo y renombrarla a 'target'
+        # Esto hace que el resto del pipeline sea más genérico
+        data_processed['target'] = data_processed['log_returns']
+
+        # Agregar lags usando la columna de precios, no el objetivo de retornos
+        data_processed = self.add_lags(data_processed, self.price_col, self.n_lags)
+
+        # --- GESTIÓN DE COLUMNAS ---
+        # 1. Guardar los nombres de todas las características ANTES de eliminar las columnas no deseadas
+        #    Se excluye el objetivo 'target' y la columna de precio original.
+        features_to_drop = ['target', self.price_col, 'log_returns', 'returns']
+        self.feature_names = [col for col in data_processed.columns if col not in features_to_drop]
+
+        # 2. Seleccionar solo las características y el objetivo final
+        final_cols = self.feature_names + ['target']
+        data_processed = data_processed[final_cols]
+
+        # 3. Limpiar valores infinitos y NaNs que puedan haber quedado
+        data_processed.replace([np.inf, -np.inf], np.nan, inplace=True)
+        data_processed.dropna(inplace=True)
+
+        print(
+            f"LSTM preprocessing completed. Shape: {data_processed.shape}. Feature names count: {len(self.feature_names)}")
+        return data_processed
+
+    def create_sequences(self, X, y):
+        """Create sequences for LSTM."""
         X = np.array(X)
         y = np.array(y)
-        
-        # Validate inputs
-        if len(X) <= time_steps:
-            raise ValueError(f"Not enough data for {time_steps} time steps")
-        
+
+        if len(X) <= self.sequence_length:
+            raise ValueError(f"Not enough data for {self.sequence_length} sequence length")
+
         X_seq, y_seq = [], []
-        for i in range(len(X) - time_steps):
-            X_seq.append(X[i:i + time_steps])
-            y_seq.append(y[i + time_steps])
-        
+        for i in range(len(X) - self.sequence_length):
+            X_seq.append(X[i:i + self.sequence_length])
+            y_seq.append(y[i + self.sequence_length])
+
         return np.array(X_seq), np.array(y_seq)
-    
+
+    def get_scalers(self):
+        """Get appropriate scalers for LSTM."""
+        # LSTM benefits from StandardScaler or MinMaxScaler
+        feature_scaler = StandardScaler()
+        target_scaler = StandardScaler()
+        return feature_scaler, target_scaler
+
+
+class XGBoostPreprocessor(BasePreprocessor):
+    """Preprocessor optimized for XGBoost models."""
+
+    def __init__(self, n_lags=15, horizons=None):
+        super().__init__()
+        self.n_lags = n_lags
+        self.horizons = horizons or [1, 3, 5, 10, 20, 50]
+
+    def add_xgb_specific_features(self, df):
+        """Features that work well with XGBoost."""
+        try:
+            df_result = df.copy()
+
+            # XGBoost loves ratios and interactions
+            for horizon in self.horizons:
+                if len(df_result) > horizon:
+                    # Multiple aggregations for same horizon
+                    rolling_mean = df_result['Close'].rolling(window=horizon, min_periods=1).mean()
+                    rolling_max = df_result['Close'].rolling(window=horizon, min_periods=1).max()
+                    rolling_min = df_result['Close'].rolling(window=horizon, min_periods=1).min()
+                    rolling_std = df_result['Close'].rolling(window=horizon, min_periods=1).std()
+
+                    df_result[f'close_to_mean_{horizon}'] = df_result['Close'] / (rolling_mean + 1e-10)
+                    df_result[f'close_to_max_{horizon}'] = df_result['Close'] / (rolling_max + 1e-10)
+                    df_result[f'close_to_min_{horizon}'] = df_result['Close'] / (rolling_min + 1e-10)
+                    df_result[f'range_ratio_{horizon}'] = (rolling_max - rolling_min) / (rolling_mean + 1e-10)
+                    df_result[f'volatility_norm_{horizon}'] = rolling_std / (rolling_mean + 1e-10)
+
+            # Advanced technical indicators
+            # Stochastic oscillator
+            if len(df_result) >= 14:
+                lowest_low = df_result['Low'].rolling(window=14, min_periods=1).min() if 'Low' in df_result.columns else \
+                df_result['Close'].rolling(window=14, min_periods=1).min()
+                highest_high = df_result['High'].rolling(window=14,
+                                                         min_periods=1).max() if 'High' in df_result.columns else \
+                df_result['Close'].rolling(window=14, min_periods=1).max()
+                df_result['stoch_k'] = 100 * (df_result['Close'] - lowest_low) / (highest_high - lowest_low + 1e-10)
+
+            # Williams %R
+            if len(df_result) >= 14:
+                df_result['williams_r'] = -100 * (highest_high - df_result['Close']) / (
+                            highest_high - lowest_low + 1e-10)
+
+            # One-hot encoding for categorical temporal features (XGBoost can handle these well)
+            if 'month' in df_result.columns:
+                for month in range(1, 13):
+                    df_result[f'month_{month}'] = (df_result['month'] == month).astype(int)
+
+            if 'day_of_week' in df_result.columns:
+                for day in range(7):
+                    df_result[f'dow_{day}'] = (df_result['day_of_week'] == day).astype(int)
+
+            return df_result
+
+        except Exception as e:
+            print(f"Error in add_xgb_specific_features: {e}")
+            raise
+
+    def prepare_data(self, data, target_col='Close'):
+        """Complete preprocessing for XGBoost."""
+        # Base features
+        data_processed = self.prepare_base_features(data, target_col)
+
+        # Add lags
+        data_processed = self.add_lags(data_processed, target_col, self.n_lags)
+
+        # Add XGB-specific features
+        data_processed = self.add_xgb_specific_features(data_processed)
+
+        print(f"XGBoost preprocessing completed. Shape: {data_processed.shape}")
+        return data_processed
+
+    def get_scalers(self):
+        """XGBoost typically doesn't need scaling, but provide for consistency."""
+        # XGBoost is scale-invariant, but we provide scalers for consistency
+        feature_scaler = None  # or StandardScaler() if needed
+        target_scaler = None  # Raw target values for XGBoost
+        return feature_scaler, target_scaler
+
+
+class ProphetPreprocessor(BasePreprocessor):
+    """Preprocessor optimized for Prophet models."""
+
+    def __init__(self):
+        super().__init__()
+
+    def prepare_prophet_format(self, data, target_col='Close'):
+        """Convert data to Prophet's required format."""
+        try:
+            # Prophet requires 'ds' (datestamp) and 'y' (target) columns
+            prophet_data = pd.DataFrame()
+
+            # Ensure datetime index
+            if not isinstance(data.index, pd.DatetimeIndex):
+                data.index = pd.to_datetime(data.index)
+
+            prophet_data['ds'] = data.index
+            prophet_data['y'] = data[target_col]
+
+            return prophet_data
+
+        except Exception as e:
+            print(f"Error in prepare_prophet_format: {e}")
+            raise
+
+    def add_prophet_regressors(self, data):
+        """Add external regressors for Prophet."""
+        try:
+            data_result = data.copy()
+
+            # Prophet can use these as additional regressors
+            # Simple features that Prophet can't learn automatically
+
+            # Volume (if available)
+            if 'Volume' in data_result.columns:
+                data_result['volume_ma'] = data_result['Volume'].rolling(window=7, min_periods=1).mean()
+                data_result['volume_trend'] = data_result['Volume'].pct_change().fillna(0)
+
+            # External market indicators
+            # RSI (simplified)
+            if len(data_result) >= 14:
+                delta = data_result['Close'].diff()
+                gain = delta.where(delta > 0, 0).rolling(window=14, min_periods=1).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
+                rs = gain / (loss + 1e-10)
+                data_result['rsi'] = 100 - (100 / (1 + rs))
+
+            # Moving average ratio
+            if len(data_result) >= 20:
+                ma_20 = data_result['Close'].rolling(window=20, min_periods=1).mean()
+                data_result['price_to_ma'] = data_result['Close'] / (ma_20 + 1e-10)
+
+            return data_result
+
+        except Exception as e:
+            print(f"Error in add_prophet_regressors: {e}")
+            raise
+
+    def prepare_data(self, data, target_col='Close'):
+        """Complete preprocessing for Prophet."""
+        # Add regressors first
+        data_with_regressors = self.add_prophet_regressors(data)
+
+        # Convert to Prophet format
+        prophet_data = self.prepare_prophet_format(data_with_regressors, target_col)
+
+        # Add regressor columns to Prophet dataframe
+        regressor_cols = ['volume_ma', 'volume_trend', 'rsi', 'price_to_ma']
+        for col in regressor_cols:
+            if col in data_with_regressors.columns:
+                prophet_data[col] = data_with_regressors[col].values
+
+        print(f"Prophet preprocessing completed. Shape: {prophet_data.shape}")
+        return prophet_data
+
+    def get_scalers(self):
+        """Prophet handles scaling internally."""
+        return None, None
+
+
+class PreprocessorFactory:
+    """Factory to create appropriate preprocessors."""
+
+    @staticmethod
+    def create_preprocessor(model_type: str, **kwargs):
+        """Create preprocessor based on model type."""
+        preprocessors = {
+            'rf': RandomForestPreprocessor,
+            'random_forest': RandomForestPreprocessor,
+            'lstm': LSTMPreprocessor,
+            'xgb': XGBoostPreprocessor,
+            'xgboost': XGBoostPreprocessor,
+            'prophet': ProphetPreprocessor
+        }
+
+        if model_type.lower() not in preprocessors:
+            raise ValueError(f"Unknown model type: {model_type}. Available: {list(preprocessors.keys())}")
+
+        return preprocessors[model_type.lower()](**kwargs)
+
+
+# Utility functions for common operations
+def split_data_universal(data: pd.DataFrame,
+                         train_size: float = 0.8,
+                         target_col: str = 'Close',
+                         shuffle: bool = False,
+                         random_state: int = None,
+                         n_splits: int = 5) -> list:
+    """Universal data splitting function using TimeSeriesSplit."""
+    try:
+        if not isinstance(data, pd.DataFrame):
+            raise ValueError("Input must be a pandas DataFrame")
+
+        if target_col not in data.columns:
+            raise ValueError(f"Target column '{target_col}' not found in DataFrame")
+
+        X = data.drop(columns=[target_col])
+        y = data[target_col]
+
+        from sklearn.model_selection import TimeSeriesSplit
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+
+        return list(tscv.split(X, y))
+
     except Exception as e:
-        print(f"Error in create_sequences: {e}")
+        print(f"Error in split_data_universal: {e}")
         raise
+
+
+def scale_data_universal(X_train, X_test, y_train, y_test,
+                         feature_scaler=None, target_scaler=None):
+    """Universal scaling function."""
+    try:
+        # Handle case where scalers are None (e.g., for XGBoost)
+        if feature_scaler is None and target_scaler is None:
+            return X_train, X_test, y_train, y_test, None, None
+
+        # Ensure inputs are numpy arrays
+        X_train = np.array(X_train)
+        X_test = np.array(X_test)
+        y_train = np.array(y_train).reshape(-1, 1) if target_scaler else y_train
+        y_test = np.array(y_test).reshape(-1, 1) if target_scaler else y_test
+
+        # Scale features
+        if feature_scaler:
+            X_train_scaled = feature_scaler.fit_transform(X_train)
+            X_test_scaled = feature_scaler.transform(X_test)
+        else:
+            X_train_scaled, X_test_scaled = X_train, X_test
+
+        # Scale target
+        if target_scaler:
+            y_train_scaled = target_scaler.fit_transform(y_train)
+            y_test_scaled = target_scaler.transform(y_test)
+        else:
+            y_train_scaled, y_test_scaled = y_train, y_test
+
+        return X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler
+
+    except Exception as e:
+        print(f"Error in scale_data_universal: {e}")
+        raise
+

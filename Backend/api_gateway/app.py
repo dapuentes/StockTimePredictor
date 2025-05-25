@@ -173,7 +173,7 @@ async def predict(
 
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(service_url, params=params, timeout=300.0)
+            response = await client.get(service_url, params=params, timeout=420.0)
             response.raise_for_status()  # Lanza un error
             return response.json()
         except Exception as e:

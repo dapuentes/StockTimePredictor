@@ -1,60 +1,50 @@
-def forecast_future_prices(model, data, forecast_horizon=10, target_col='Close'):
-    """
-    Forecast future prices based on the given model and data.
+import pandas as pd
+from typing import Tuple
+import numpy as np
+from .lstm_model import TimeSeriesLSTMModel
 
-    This function performs a future price prediction for a specified number of
-    days using the input model. It processes the data, scales features if
-    necessary, utilizes the model's prediction capabilities, and optionally
-    scales results back to their original scale. Additionally, it prints the
-    forecasted prices and generates a plot for visualization.
+
+def forecast_future_prices_lstm(
+        model: TimeSeriesLSTMModel,
+        data: pd.DataFrame,
+        forecast_horizon: int = 10,
+        target_col: str = 'Close'
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Forecast future prices using an LSTM model for a given forecast horizon while handling
+    prediction intervals and providing console-based output.
 
     Args:
-        model: A predictive model object. This object should have the methods
-            `prepare_data`, `predict_future`, and `plot_forecast`. It may also
-            include optional scalers, `feature_scaler` and `target_scaler`, used
-            for preprocessing input features and postprocessing predicted values.
-        data: A DataFrame that contains historical data used for training and
-            generating future predictions.
-        forecast_horizon: int, optional. The number of days to forecast into
-            the future. Defaults to 10.
-        target_col: str, optional. The name of the column in the data which
-            serves as the target variable for prediction. Defaults to 'Close'.
+        model (TimeSeriesLSTMModel): The LSTM model used for forecasting. Must implement a
+            `predict_future` method designed to handle recursive and interval-based predictions.
+        data (pd.DataFrame): A DataFrame containing the historical data required for prediction.
+        forecast_horizon (int): The number of future periods (e.g., days) to forecast. Default is 10.
+        target_col (str): The name of the column in the data representing the target variable
+            to forecast. Default is 'Close'.
 
     Returns:
-        list: A list of forecasted future prices corresponding to the next
-            `forecast_horizon` days.
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing three numpy arrays:
+            - The first array represents the forecast values.
+            - The second array represents the lower bounds of the prediction intervals.
+            - The third array represents the upper bounds of the prediction intervals.
     """
+    print(f"\n--- Iniciando la llamada al pronóstico para los próximos {forecast_horizon} días ---")
 
-    # Preparar los datos más recientes
-    processed_data = model.prepare_data(data, target_col=target_col)
 
-    # Obtener la última fila de datos para la predicción
-    last_data = processed_data.iloc[-1:]
-    X_last = last_data.drop(columns=[target_col])
-
-    if model.feature_scaler:
-        X_last_scaled = model.feature_scaler.transform(X_last)
-    else:
-        X_last_scaled = X_last.values
-
-    # Pronosticar precios futuros
-    forecast_scaled = model.predict_future(X_last_scaled, forecast_horizon)
-
-    if model.target_scaler:
-        forecast = model.target_scaler.inverse_transform(
-            forecast_scaled.reshape(-1, 1)).ravel()
-    else:
-        forecast = forecast_scaled
-
-    # Imprimir los resultados
-    print(f"Forecasted prices for the next {forecast_horizon} days:")
-    for i in range(forecast_horizon):
-        print(f"Day {i + 1}: {forecast[i]}")
-
-    model.plot_forecast(
-        data,
-        forecast,
+    # Este método ya está diseñado para manejar la recursividad y los intervalos.
+    forecast, lower_bounds, upper_bounds = model.predict_future(
+        historical_data_df=data,
+        forecast_horizon=forecast_horizon,
         target_col=target_col
     )
 
-    return forecast
+    # Imprimir los resultados en la consola para una fácil verificación
+    print(f"\n--- Resultados del Pronóstico (Valores Desescalados) ---")
+    for i in range(forecast_horizon):
+        print(
+            f"Día {i + 1}: "
+            f"Predicción = {forecast[i]:.4f} "
+            f"(Intervalo 95%: [{lower_bounds[i]:.4f} - {upper_bounds[i]:.4f}])"
+        )
+
+    return forecast, lower_bounds, upper_bounds

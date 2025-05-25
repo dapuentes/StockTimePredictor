@@ -1,41 +1,12 @@
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.feature_selection import SelectFromModel
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.base import BaseEstimator, TransformerMixin
 import joblib
 import numpy as np
 import pandas as pd
 import os
 import json
-
-
-class FeatureSelector(BaseEstimator, TransformerMixin):
-    """
-    A transformer for selecting specific features from a dataset.
-
-    FeatureSelector is a custom transformer that enables feature selection
-    by specifying their indices. It implements the scikit-learn TransformerMixin
-    and can be used in machine learning pipelines to preprocess data
-    before feeding it into a model. The user has to provide a list of indices
-    representing the features to select, or it will default to returning
-    all features.
-
-    Attributes:
-        features_index (Optional[List[int]]): A list of feature indices to select.
-            If None, all features will be returned.
-    """
-
-    def __init__(self, features_index=None):
-        self.features_index = features_index
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        if self.features_index is None:
-            return X
-        return X[:, self.features_index]
 
 
 class TimeSeriesRandomForestModel:
@@ -174,47 +145,26 @@ class TimeSeriesRandomForestModel:
         if feature_names is None or len(feature_names) == 0:
             raise ValueError("Se requiere proporcionar feature_names para la selección de características")
 
-        # Encontrar índices de características de lag y otros indicadores
-        lag_indices = [i for i, name in enumerate(feature_names) if '_lag_' in name]
+        estimator_for_selection = RandomForestRegressor(n_estimators=50, random_state=42)
 
-        # Lista de indicadores técnicos comunes
-        indicator_names = ['SMA_5', 'RSI', 'SMA_20', 'EMA_12', 'EMA_26', '20d_std', 'MACD']
-
-        # Obtener índices de los indicadores que existen en feature_names
-        indicator_indices = []
-        for indicator in indicator_names:
-            indices = [i for i, name in enumerate(feature_names) if name == indicator]
-            indicator_indices.extend(indices)
-
-        # Si no hay configuración de parámetros, usar valores predeterminados
         if param_grid is None:
-            # Crear diferentes combinaciones de características por índice
-            feature_combinations = [
-                lag_indices,  # Solo características de lag
-                lag_indices + [i for i, name in enumerate(feature_names) if name == 'SMA_5' and i in indicator_indices],
-                lag_indices + [i for i, name in enumerate(feature_names) if name == 'RSI' and i in indicator_indices],
-                lag_indices + indicator_indices  # Lag + todos los indicadores disponibles
-            ]
-
-            # Eliminar combinaciones vacías o duplicadas
-            feature_combinations = [list(set(combo)) for combo in feature_combinations if combo]
-            if not feature_combinations:
-                # Si no hay combinaciones válidas, usar todos los índices
-                feature_combinations = [list(range(len(feature_names)))]
-
             param_grid = {
-                'selector__features_index': feature_combinations,
-                'rf__n_estimators': [50, 100, 200],
-                'rf__max_depth': [3, 5, 7, 10],
-                'rf__min_samples_split': [5, 10],
-                'rf__min_samples_leaf': [10, 20],
-                'rf__max_features': ['sqrt', 'log2', 0.5]
+                'selector__max_features': [min(10, len(feature_names)), min(15, len(feature_names)),
+                                           min(20, len(feature_names))],
+                'rf__n_estimators': [100, 200],
+                'rf__max_depth': [10, 15, 20, None],
+                'rf__min_samples_split': [2, 5, 10],
+                'rf__min_samples_leaf': [3, 5, 7],
+                'rf__max_features': ['sqrt', 'log2', 0.5, 0.7]
             }
+            param_grid['selector__max_features'] = [mf for mf in param_grid['selector__max_features'] if
+                                                    mf <= len(feature_names) and mf > 0]
+            if not param_grid['selector__max_features']:  # Si la lista queda vacía
+                param_grid['selector__max_features'] = [len(feature_names)]
 
         # Crear pipeline con selector, scaler y modelo
         pipeline = Pipeline([
-            ('selector', FeatureSelector()),
-            ('scaler', StandardScaler()),
+            ('selector', SelectFromModel(estimator=estimator_for_selection)),
             ('rf', self.model)
         ])
 
@@ -227,18 +177,29 @@ class TimeSeriesRandomForestModel:
             param_grid=param_grid,
             cv=tscv,
             scoring='neg_mean_squared_error',
-            n_jobs=-1
+            n_jobs=-1,
+            verbose=1
         )
 
-        # Ajustar la búsqueda en cuadrícula
+        print("Iniciando GridSearchCV con SelectFromModel...")
         grid_search.fit(X_train, y_train)
+        print("GridSearchCV completado.")
 
-        # Guardar el mejor modelo y parámetros
         self.best_pipeline_ = grid_search.best_estimator_
         self.best_params_ = grid_search.best_params_
 
-        # Extraer las importancias de características del modelo RF en el pipeline
-        if hasattr(self.best_pipeline_, 'named_steps') and 'rf' in self.best_pipeline_.named_steps:
+        selected_indices = self.best_pipeline_.named_steps['selector'].get_support(indices=True)
+        self.selected_feature_names_ = [feature_names[i] for i in selected_indices]
+
+        # Guardar los índices seleccionados en best_params_ para compatibilidad con la API
+        self.best_params_['selector__features_index'] = selected_indices.tolist()
+
+        print(f"Mejores parámetros encontrados: {self.best_params_}")
+        print(f"Número de características seleccionadas por SelectFromModel: {len(self.selected_feature_names_)}")
+        print(f"Características seleccionadas (nombres): {self.selected_feature_names_}")
+
+        if hasattr(self.best_pipeline_.named_steps['rf'], 'feature_importances_'):
+            # Estas son las importancias del RF final, entrenado SOLO con las features seleccionadas
             self.feature_importances_ = self.best_pipeline_.named_steps['rf'].feature_importances_
 
         return self
@@ -263,71 +224,156 @@ class TimeSeriesRandomForestModel:
 
         return self.metrics
 
-    def predict_future(self, X_test, forecast_horizon):
-        """
-        Predicción recursiva de valores futuros
+    def predict_future(self, historical_data_df, forecast_horizon, target_col='Close'):
+        print("\n--- Entrando a predict_future (FINAL, con escalado externo consistente y chequeo de features) ---")
 
-        Parámetros:
-        - X_test: Los datos de entrada que deben contener columnas de lag para la predicción.
-        - forecast_horizon: Horizonte de predicción (número de pasos futuros a predecir).
+        # Verificaciones iniciales de atributos
+        if not self.best_pipeline_: raise ValueError("El modelo (best_pipeline_) no ha sido ajustado.")
+        if not hasattr(self, 'target_scaler') or self.target_scaler is None: raise ValueError(
+            "target_scaler no disponible.")
+        if not hasattr(self, 'feature_scaler') or self.feature_scaler is None: raise ValueError(
+            "feature_scaler no disponible.")
+        if not hasattr(self, 'feature_names') or self.feature_names is None or len(self.feature_names) == 0:
+            raise ValueError("feature_names no establecidos o vacíos.")
 
-        Devuelve:
-        - Array de predicciones futuras
-        """
+        # Determinar el número de features esperadas por el feature_scaler
+        n_features_expected_by_scaler = 0
+        if hasattr(self.feature_scaler, 'n_features_in_'):
+            n_features_expected_by_scaler = self.feature_scaler.n_features_in_
+        elif hasattr(self.feature_scaler, 'get_feature_names_out'):
+            n_features_expected_by_scaler = len(self.feature_scaler.get_feature_names_out())
+        else:  # Fallback si no se pueden obtener las features del scaler
+            n_features_expected_by_scaler = len(self.feature_names)
+            print(
+                f"Advertencia: No se pudo determinar n_features_in_ de self.feature_scaler. Asumiendo {n_features_expected_by_scaler} basado en len(self.feature_names).")
 
-        # Verificar que X_test es un DataFrame y que contiene columnas de lag
-        if isinstance(X_test, pd.DataFrame):
-            lag_columns = [col for col in X_test.columns if '_lag_' in col]
-            if not lag_columns:
-                raise ValueError("Input data must contain lag columns for prediction.")
-            # Tomamos la última fila con las columnas de lag
-            input_data = X_test[lag_columns].iloc[-1:].values
-        else:
-            input_data = np.array(X_test).reshape(1, -1)
+        if len(self.feature_names) != n_features_expected_by_scaler:
+            print(
+                f"ALERTA CRÍTICA INICIAL: len(self.feature_names) ({len(self.feature_names)}) no coincide con las features esperadas por self.feature_scaler ({n_features_expected_by_scaler}).")
+            # Esto podría indicar un problema al guardar/cargar el modelo o feature_names.
 
-        # Predicción recursiva
+        current_data_df = historical_data_df.copy()
         predictions_scaled_list = []
         lower_bounds_scaled_list = []
         upper_bounds_scaled_list = []
-        current_input = input_data.copy()
-
-        if not self.best_pipeline_:
-            raise ValueError("El modelo no ha sido ajustado. Por favor, ajuste el modelo antes de predecir.")
 
         selector = self.best_pipeline_.named_steps.get('selector')
-        scaler = self.best_pipeline_.named_steps.get('scaler')
         rf_model = self.best_pipeline_.named_steps.get('rf')
 
-        if not all([selector, scaler, rf_model]):
-            raise RuntimeError("El pipeline no contiene los pasos esperados: 'selector', 'scaler' y 'rf'.")
-        if not hasattr(rf_model, 'estimators_') or not rf_model.estimators_:
-            raise RuntimeError("El modelo Random Forest en el pipeline no tiene estimadores.")
+        if not all([selector, rf_model]): raise RuntimeError("Pipeline no contiene 'selector' y 'rf'.")
+        if not hasattr(rf_model, 'estimators_'): raise RuntimeError("RF en pipeline no tiene estimadores.")
 
-        for _ in range(forecast_horizon):
-            # Predicción puntual
-            point_pred_scaled = self.best_pipeline_.predict(current_input)[0]
+        for i in range(forecast_horizon):
+            print(f"\n--- Paso {i + 1}/{forecast_horizon} ---")
+            # ... (impresiones de current_data_df.tail(3) si deseas) ...
+
+            processed_features_df = self.prepare_data(current_data_df.copy(), target_col=target_col)
+            if processed_features_df.empty: raise ValueError("prepare_data devolvió DataFrame vacío.")
+
+            last_prepared_row_series = processed_features_df.iloc[-1]
+
+            # Asegurar que current_input_for_pipeline tenga las columnas correctas y en el orden de self.feature_names
+            # y que self.feature_names tenga el número correcto de features (ej. 41)
+            try:
+                current_input_for_pipeline = pd.DataFrame([last_prepared_row_series], columns=self.feature_names)
+            except Exception as e:
+                print(f"ERROR creando current_input_for_pipeline con self.feature_names. ¿Hay un desajuste?")
+                print(f"Longitud de self.feature_names: {len(self.feature_names)}")
+                print(f"Índice de last_prepared_row_series: {last_prepared_row_series.index.tolist()}")
+                raise e
+
+            if current_input_for_pipeline.shape[1] != n_features_expected_by_scaler:
+                print(
+                    f"ALERTA BUCLE: current_input_for_pipeline tiene {current_input_for_pipeline.shape[1]} cols, scaler espera {n_features_expected_by_scaler}.")
+                # Considera detener o manejar este error si ocurre consistentemente.
+
+            # 1. Escalar con self.feature_scaler (MinMaxScaler)
+            scaled_features_N = self.feature_scaler.transform(current_input_for_pipeline)
+
+            # 2. Predecir con el pipeline (selector -> rf) que espera datos escalados [0,1]
+            point_pred_scaled = self.best_pipeline_.predict(scaled_features_N)[0]
             predictions_scaled_list.append(point_pred_scaled)
+            print(f"point_pred_scaled (pipeline sobre data [0,1]): {point_pred_scaled:.8f}")
 
-            # Predicciones de cada árbol
-            current_input_selected = selector.transform(current_input)
-            current_input_scaled_for_rf = scaler.transform(current_input_selected)
+            # 3. Para intervalos y depuración del RF (opcional, pero bueno para verificar)
+            selected_and_scaled_features_k = selector.transform(scaled_features_N)
+            # print(f"selected_and_scaled_features_k ({selected_and_scaled_features_k.shape[1]} features para RF):")
+            # print(selected_and_scaled_features_k)
+            # point_pred_scaled_direct_rf = rf_model.predict(selected_and_scaled_features_k)[0]
+            # print(f"point_pred_scaled (directo de rf_model): {point_pred_scaled_direct_rf:.8f}")
 
-            individual_tree_preds_scaled = np.array([
-                tree.predict(current_input_scaled_for_rf)[0] for tree in rf_model.estimators_
-            ])
+            individual_tree_preds_scaled = np.array(
+                [tree.predict(selected_and_scaled_features_k)[0] for tree in rf_model.estimators_])
+            lower_bounds_scaled_list.append(np.percentile(individual_tree_preds_scaled, 2.5))
+            upper_bounds_scaled_list.append(np.percentile(individual_tree_preds_scaled, 97.5))
 
-            # Calcular los límites inferior y superior
-            lower_b_scaled = np.percentile(individual_tree_preds_scaled, 2.5)
-            upper_b_scaled = np.percentile(individual_tree_preds_scaled, 97.5)
+            point_pred_unscaled = \
+            self.target_scaler.inverse_transform(np.array(point_pred_scaled).reshape(-1, 1)).flatten()[0]
+            print(f"point_pred_unscaled: {point_pred_unscaled:.4f}")
 
-            lower_bounds_scaled_list.append(lower_b_scaled)
-            upper_bounds_scaled_list.append(upper_b_scaled)
+            # Propagación de OHLG
+            new_row_values = {col: np.nan for col in current_data_df.columns}
+            new_row_values[target_col] = point_pred_unscaled
+            # ... (resto de la lógica de OHLG y next_index como en la versión anterior que te funcionó para predicciones dinámicas) ...
+            if not current_data_df.empty:
+                prev_open_val = current_data_df['Open'].iloc[-1];
+                prev_high_val = current_data_df['High'].iloc[-1]
+                prev_low_val = current_data_df['Low'].iloc[-1];
+                prev_close_val = current_data_df[target_col].iloc[-1]
+                current_open = prev_close_val
+                if 'Open' in new_row_values: new_row_values['Open'] = current_open
+                if 'High' in new_row_values: new_row_values['High'] = current_open + (prev_high_val - prev_open_val)
+                if 'Low' in new_row_values: new_row_values['Low'] = current_open - (prev_open_val - prev_low_val)
+                # Consistencia OHL
+                if 'High' in new_row_values and 'Open' in new_row_values and new_row_values['High'] < new_row_values[
+                    'Open']: new_row_values['High'] = new_row_values['Open']
+                if 'Low' in new_row_values and 'Open' in new_row_values and new_row_values['Low'] > new_row_values[
+                    'Open']: new_row_values['Low'] = new_row_values['Open']
+                if 'High' in new_row_values and 'Low' in new_row_values and new_row_values['High'] < new_row_values[
+                    'Low']:
+                    avg_ohl = (new_row_values.get('High', 0) + new_row_values.get('Low', 0)) / 2.0;
+                    new_row_values['High'] = avg_ohl + abs(avg_ohl * 0.001) + 0.01;
+                    new_row_values['Low'] = avg_ohl - abs(avg_ohl * 0.001) - 0.01  # Asegurar spread
+            else:  # Fallback
+                if 'Open' in new_row_values: new_row_values['Open'] = point_pred_unscaled * 0.998
+                if 'High' in new_row_values: new_row_values['High'] = point_pred_unscaled * 1.002
+                if 'Low' in new_row_values: new_row_values['Low'] = point_pred_unscaled * 0.995
+            if 'GreenDay' in new_row_values:
+                if not current_data_df.empty:
+                    new_row_values['GreenDay'] = 1 if point_pred_unscaled > current_data_df[target_col].iloc[-1] else 0
+                else:
+                    new_row_values['GreenDay'] = 0
 
-            # Actualizar el input deslizando las características a la izquierda y añadiendo la predicción al final
-            current_input = np.roll(current_input, -1, axis=1)  # Asegurar axis=1 para array 2D
-            current_input[0, -1] = point_pred_scaled  # Usar la predicción puntual para la recursión
+            last_index_val = current_data_df.index[-1];
+            next_index_val = None
+            if isinstance(last_index_val, pd.Timestamp):
+                freq = pd.infer_freq(current_data_df.index) if len(current_data_df.index) >= 3 else 'D'
+                if freq is None: freq = 'D'
+                try:
+                    next_index_val = last_index_val + pd.tseries.frequencies.to_offset(freq)
+                except ValueError:
+                    next_index_val = last_index_val + pd.Timedelta(days=1)
+            elif pd.api.types.is_numeric_dtype(current_data_df.index.dtype):
+                try:
+                    next_index_val = last_index_val + 1
+                except TypeError:
+                    next_index_val = int(last_index_val) + 1
+            if next_index_val is None: next_index_val = (current_data_df.index.max() if pd.api.types.is_numeric_dtype(
+                current_data_df.index) else len(current_data_df) - 1) + 1
 
-        return np.array(predictions_scaled_list), np.array(lower_bounds_scaled_list), np.array(upper_bounds_scaled_list)
+            new_row_df = pd.DataFrame([new_row_values], index=[next_index_val])
+            current_data_df = pd.concat([current_data_df, new_row_df])
+
+        # Desescalado final
+        predictions_unscaled = self.target_scaler.inverse_transform(
+            np.array(predictions_scaled_list).reshape(-1, 1)).flatten()
+        lower_bounds_unscaled = self.target_scaler.inverse_transform(
+            np.array(lower_bounds_scaled_list).reshape(-1, 1)).flatten()
+        upper_bounds_unscaled = self.target_scaler.inverse_transform(
+            np.array(upper_bounds_scaled_list).reshape(-1, 1)).flatten()
+
+        print("--- Saliendo de predict_future ---")
+        return predictions_unscaled, lower_bounds_unscaled, upper_bounds_unscaled
 
     def plot_results(self, y_true, y_pred, title="Model Predictions"):
         """
