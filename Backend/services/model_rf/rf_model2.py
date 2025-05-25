@@ -42,15 +42,23 @@ class TimeSeriesRandomForestModel:
                  n_lags=10
                  ):
         """
-        Inicializa el modelo de Random Forest con parámetros configurables
+        Initializes the object with the given parameters to configure the
+        RandomForestRegressor model and other related utilities. This constructor
+        enables customization of the model's hyperparameters as well as additional
+        attributes specific to the class functionality.
 
-        Parámetros:
-        - n_estimators: Número de árboles
-        - max_depth: Profundidad máxima de los árboles
-        - min_samples_split: Mínimo de muestras para dividir un nodo interno
-        - min_samples_leaf: Mínimo de muestras en un nodo hoja
-        - max_features: Número de características a considerar para una mejor división
-        - n_lags: Número de características de retardo a crear
+        Args:
+            n_estimators: Number of trees in the forest.
+            max_depth: Maximum depth of the tree. If None, nodes are expanded until
+                all leaves are pure or until all leaves contain less than
+                `min_samples_split` samples.
+            min_samples_split: Minimum number of samples required to split an
+                internal node.
+            min_samples_leaf: Minimum number of samples required to be at a leaf node.
+            max_features: Number of features to consider when looking for the best
+                split. This can be an integer, float, or specific options like 'log2'.
+            n_lags: Number of lag values to be used for generating features for time
+                series or sequential data.
         """
         self.model = RandomForestRegressor(
             n_estimators=n_estimators,
@@ -70,14 +78,23 @@ class TimeSeriesRandomForestModel:
 
     def prepare_data(self, data, target_col='Close'):
         """
-        Preparar datos de series temporales con ingeniería de características
+        Prepares the data for modeling by sorting, generating lag features, and applying feature
+        engineering if possible.
 
-        Parámetros:
-        - data: DataFrame de entrada que contiene los datos
-        - target_col: Nombre de la columna de destino para la predicción (el valor predeterminado es 'Close')
+        This function processes time series data to ensure it is ordered by the date index,
+        creates lagged features based on the specified target column, and optionally applies
+        additional feature engineering when critical columns are present in the dataset. If
+        required columns are missing or an error occurs during feature engineering, the output
+        will contain only the generated lag features.
 
-        Devuelve:
-        - DataFrame procesado con características
+        Args:
+            data (pd.DataFrame): Input dataframe containing the time series data.
+            target_col (str): Name of the target column on which lag features will be based.
+                Defaults to 'Close'.
+
+        Returns:
+            pd.DataFrame: A transformed dataframe with lag features and, if applicable,
+            additional engineered features.
         """
 
         from utils.preprocessing import feature_engineering, add_lags
@@ -104,40 +121,61 @@ class TimeSeriesRandomForestModel:
 
     def fit(self, X_train, y_train):
         """
-        Entrenar el modelo de Random Forest
+        Fits the model using the provided training data. The method adjusts the internal
+        model or pipeline to learn from the given features and corresponding target variables.
 
-        Parámetros:
-        - X_train: Características de entrenamiento
-        - y_train: Valores objetivo de entrenamiento
+        Args:
+            X_train: Training data features for the model to learn from.
+            y_train: Target variable corresponding to the training data.
+
+        Returns:
+            The object instance itself after fitting the model or pipeline.
         """
         self.best_pipeline_.fit(X_train, y_train)  # Ajustar el modelo
         return self
 
     def predict(self, X):
         """
-        Realizar predicciones usando el modelo entrenado.
+        Predict outcomes based on the provided data using the best trained pipeline.
 
-        Parámetros:
-        - X: Datos de entrada para la predicción
+        This method utilizes the best fitted pipeline for making predictions on the
+        input data. It assumes that the pipeline has been appropriately trained and
+        optimized beforehand.
 
-        Devuelve:
-        - Predicciones realizadas por el modelo.
+        Args:
+            X: Data to be used for making predictions. The format and structure must
+               be compatible with the requirements of the pipeline used.
+
+        Returns:
+            The predicted outcomes as produced by the best fitted pipeline. The format
+            and type will align with the pipeline's output specifications.
         """
         return self.best_pipeline_.predict(X)
 
     def optimize_hyperparameters(self, X_train, y_train, feature_names=None, param_grid=None, cv=3):
         """
-        Optimizar hiperparámetros utilizando GridSearchCV
+        Optimize hyperparameters using grid search with cross-validation for a pipeline that includes
+        feature selection and a Random Forest model. This method performs feature selection using a
+        `SelectFromModel` approach, followed by hyperparameter tuning for the entire pipeline.
 
-        Parámetros:
-        - X_train: Características de entrenamiento (array NumPy)
-        - y_train: Valores objetivo de entrenamiento
-        - feature_names: Lista de nombres de las características
-        - param_grid: Diccionario de hiperparámetros a buscar
-        - cv: Número de pliegues de validación cruzada
+        The method stores the optimized pipeline, selected feature names, and relevant parameters. If
+        no `param_grid` is specified, a default parameter grid is used. The cross-validation scheme is
+        specifically designed for time-series data using `TimeSeriesSplit`.
 
-        Devuelve:
-        - Modelo optimizado
+        Args:
+            X_train: Training data features to fit the pipeline.
+            y_train: Target values corresponding to X_train.
+            feature_names: List of feature names corresponding to columns in X_train.
+            param_grid: Dictionary specifying the parameter grid for hyperparameter optimization.
+                If None, a default grid is used.
+            cv: Number of cross-validation folds for `TimeSeriesSplit`.
+
+        Returns:
+            self: Instance of the class with the optimized pipeline, best parameters,
+                and selected feature information stored as attributes.
+
+        Raises:
+            ValueError: Raised when `feature_names` is not provided or is empty.
         """
         # Guardar los nombres de las características
         self.feature_names = feature_names
@@ -206,14 +244,16 @@ class TimeSeriesRandomForestModel:
 
     def evaluate(self, X_test, y_test):
         """
-        Evaluar el modelo utilizando métricas de rendimiento
+        Evaluates the model's performance on test data by predicting the outcomes using the best
+        pipeline, scaling the predictions back to their original metric, and computing the regression
+        evaluation metrics.
 
-        Parámetros:
-        - X_test: Características de prueba
-        - y_test: Valores objetivo de prueba
+        Args:
+            X_test: Test input dataset to be used for prediction.
+            y_test: True target values corresponding to the test input dataset.
 
-        Devuelve:
-        - Diccionario con las métricas de evaluación
+        Returns:
+            dict: A dictionary containing computed regression evaluation metrics.
         """
 
         from utils.evaluation import evaluate_regression
@@ -225,7 +265,35 @@ class TimeSeriesRandomForestModel:
         return self.metrics
 
     def predict_future(self, historical_data_df, forecast_horizon, target_col='Close'):
-        print("\n--- Entrando a predict_future (FINAL, con escalado externo consistente y chequeo de features) ---")
+        """
+        Predicts future target values for the given historical data, utilizing a trained pipeline that includes
+        feature preprocessing, selection, and a Random Forest model. The function dynamically forecasts multiple
+        time steps ahead, scaling features correctly and maintaining series integrity.
+
+        Args:
+            historical_data_df (pd.DataFrame): Historical data used as the initial input for predictions. Must
+                include at least the columns required for the pipeline features (`self.feature_names`).
+            forecast_horizon (int): Number of time steps to predict into the future.
+            target_col (str): Name of the column to predict within the `historical_data_df`. Defaults to 'Close'.
+
+        Raises:
+            ValueError: If the necessary components of the trained model (e.g., `best_pipeline_`, `target_scaler`,
+                `feature_scaler`, `feature_names`) are missing or not properly initialized, or if data preparation
+                results in inconsistencies or empty inputs.
+            RuntimeError: If the pipeline does not contain the expected components ('selector', 'rf'), or if the
+                Random Forest model lacks required attributes (e.g., `estimators_`).
+            Exception: If feature preparation or transformation mismatches the expected structure (e.g., feature
+                count mismatch between pipeline and `feature_scaler`).
+
+        Notes:
+            - The function implements internal checks to ensure consistency between the trained pipeline, feature
+              names, and scalers.
+            - Propagation of specific columns (e.g., 'Open', 'High', 'Low') is based on prior time step values and
+              ensures consistency within Open-High-Low-Close (OHLC) format.
+            - A sliding approach is used to dynamically predict future rows by appending new predicted values and
+              propagating them into subsequent steps.
+        """
+        print("\n--- Entrando a predict_future ---")
 
         # Verificaciones iniciales de atributos
         if not self.best_pipeline_: raise ValueError("El modelo (best_pipeline_) no ha sido ajustado.")
@@ -265,7 +333,6 @@ class TimeSeriesRandomForestModel:
 
         for i in range(forecast_horizon):
             print(f"\n--- Paso {i + 1}/{forecast_horizon} ---")
-            # ... (impresiones de current_data_df.tail(3) si deseas) ...
 
             processed_features_df = self.prepare_data(current_data_df.copy(), target_col=target_col)
             if processed_features_df.empty: raise ValueError("prepare_data devolvió DataFrame vacío.")
@@ -273,7 +340,6 @@ class TimeSeriesRandomForestModel:
             last_prepared_row_series = processed_features_df.iloc[-1]
 
             # Asegurar que current_input_for_pipeline tenga las columnas correctas y en el orden de self.feature_names
-            # y que self.feature_names tenga el número correcto de features (ej. 41)
             try:
                 current_input_for_pipeline = pd.DataFrame([last_prepared_row_series], columns=self.feature_names)
             except Exception as e:
@@ -287,20 +353,16 @@ class TimeSeriesRandomForestModel:
                     f"ALERTA BUCLE: current_input_for_pipeline tiene {current_input_for_pipeline.shape[1]} cols, scaler espera {n_features_expected_by_scaler}.")
                 # Considera detener o manejar este error si ocurre consistentemente.
 
-            # 1. Escalar con self.feature_scaler (MinMaxScaler)
+            #  Escalar con self.feature_scaler (MinMaxScaler)
             scaled_features_N = self.feature_scaler.transform(current_input_for_pipeline)
 
-            # 2. Predecir con el pipeline (selector -> rf) que espera datos escalados [0,1]
+            #  Predecir con el pipeline
             point_pred_scaled = self.best_pipeline_.predict(scaled_features_N)[0]
             predictions_scaled_list.append(point_pred_scaled)
             print(f"point_pred_scaled (pipeline sobre data [0,1]): {point_pred_scaled:.8f}")
 
-            # 3. Para intervalos y depuración del RF (opcional, pero bueno para verificar)
+            # Para intervalos y depuración del RF
             selected_and_scaled_features_k = selector.transform(scaled_features_N)
-            # print(f"selected_and_scaled_features_k ({selected_and_scaled_features_k.shape[1]} features para RF):")
-            # print(selected_and_scaled_features_k)
-            # point_pred_scaled_direct_rf = rf_model.predict(selected_and_scaled_features_k)[0]
-            # print(f"point_pred_scaled (directo de rf_model): {point_pred_scaled_direct_rf:.8f}")
 
             individual_tree_preds_scaled = np.array(
                 [tree.predict(selected_and_scaled_features_k)[0] for tree in rf_model.estimators_])
@@ -314,7 +376,6 @@ class TimeSeriesRandomForestModel:
             # Propagación de OHLG
             new_row_values = {col: np.nan for col in current_data_df.columns}
             new_row_values[target_col] = point_pred_unscaled
-            # ... (resto de la lógica de OHLG y next_index como en la versión anterior que te funcionó para predicciones dinámicas) ...
             if not current_data_df.empty:
                 prev_open_val = current_data_df['Open'].iloc[-1];
                 prev_high_val = current_data_df['High'].iloc[-1]
@@ -375,32 +436,6 @@ class TimeSeriesRandomForestModel:
         print("--- Saliendo de predict_future ---")
         return predictions_unscaled, lower_bounds_unscaled, upper_bounds_unscaled
 
-    def plot_results(self, y_true, y_pred, title="Model Predictions"):
-        """
-        Graficar los resultados de la predicción
-
-        Parámetros:
-        - y_true: Valores verdaderos
-        - y_pred: Valores predichos
-        - title: Título del gráfico
-        """
-        from utils.visualizations import plot_predictions
-
-        plot_predictions(y_true, y_pred, title=title)
-
-    def plot_forecast(self, historical_data, forecast_values, target_col='Close'):
-        """
-        Graficar el pronóstico comparado con los datos históricos
-
-        Parámetros:
-        - historical_data: Datos históricos
-        - forecast_values: Valores pronosticados
-        - target_col: Nombre de la columna objetivo
-        """
-        from utils.visualizations import plot_forecast
-
-        plot_forecast(historical_data, forecast_values, target_col=target_col)
-
     def save_model(self, model_path="models/model.joblib", training_end_date=None):
         """
         Guardar el modelo entrenado en un archivo
@@ -439,13 +474,17 @@ class TimeSeriesRandomForestModel:
     @classmethod
     def load_model(cls, model_path):
         """
-        Cargar un modelo previamente guardado
+        Loads and returns a machine learning model from a specified file path.
 
-        Parámetros:
-        - model_path: Ruta del archivo del modelo
+        This method is a class method that uses the joblib library to deserialize
+        and load a previously saved model. The model file must be a valid file
+        supported by joblib.
 
-        Devuelve:
-        - Instancia del modelo cargado
+        Args:
+            model_path (str): The file path to the serialized model file.
+
+        Returns:
+            Any: The deserialized model object loaded from the specified file.
         """
         return joblib.load(model_path)
 

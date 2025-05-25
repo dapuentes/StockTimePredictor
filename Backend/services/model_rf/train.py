@@ -80,10 +80,6 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     )
     print(f"Best parameters: {model.best_params_}")
 
-    # selected_indices = model.best_params_.get('selector__features_index')
-    # feature_importances = model.feature_importances_.tolist()
-    # print(f"Feature importances: {feature_importances}")
-
     # Modelo de entrenamiento
     y_train_pred_scaled = model.best_pipeline_.predict(X_train_scaled)
 

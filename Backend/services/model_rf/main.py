@@ -14,8 +14,6 @@ from Backend.utils.import_data import load_data
 
 app = FastAPI(title="Random Forest Time Series Model Service", version="1.0.0")
 
-
-# Definir el modelo de datos para la solicitud de entrenamiento
 class TrainRequest(BaseModel):
     """
     Represents a request for training a model with specific configurations.
