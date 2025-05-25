@@ -8,7 +8,17 @@ from abc import ABC, abstractmethod
 
 class BasePreprocessor:
     """
-    Base preprocessor with common functionality for all models.
+    Handles preprocessing of time-series data by adding lag features, technical indicators,
+    temporal features, and performing general dataset preparations.
+
+    This class provides utility functions to process financial or time-series data,
+    making it ready for machine learning models by augmenting the dataset with
+    various statistical, temporal, and technical features.
+
+    Attributes:
+        feature_scaler: Placeholder for feature standardization or normalization scaler.
+        target_scaler: Placeholder for target column standardization or normalization scaler.
+        feature_names: Stores the names of generated features.
     """
 
     def __init__(self):
@@ -220,6 +230,7 @@ class LSTMPreprocessor(BasePreprocessor):
         super().__init__()
         self.sequence_length = sequence_length
         self.n_lags = n_lags
+        self.price_col = None
 
     def add_lstm_specific_features(self, df):
         """Features that work well with LSTM (fewer, more stationary)."""
@@ -228,14 +239,14 @@ class LSTMPreprocessor(BasePreprocessor):
 
             # LSTM prefers normalized/stationary features
             # Returns instead of raw prices
-            df_result['returns'] = df_result['Close'].pct_change().fillna(0)
-            df_result['log_returns'] = np.log(df_result['Close'] / df_result['Close'].shift(1)).fillna(0)
+            df_result['returns'] = df_result[self.price_col].pct_change().fillna(0)
+            df_result['log_returns'] = np.log(df_result[self.price_col] / df_result[self.price_col].shift(1)).fillna(0)
 
             # Simple moving average ratios (LSTM can learn complex patterns)
             for window in [5, 20]:
                 if len(df_result) >= window:
-                    ma = df_result['Close'].rolling(window=window, min_periods=1).mean()
-                    df_result[f'price_ma_ratio_{window}'] = df_result['Close'] / (ma + 1e-10)
+                    ma = df_result[self.price_col].rolling(window=window, min_periods=1).mean()
+                    df_result[f'price_ma_ratio_{window}'] = df_result[self.price_col] / (ma + 1e-10)
 
             # Volatility features (important for LSTM)
             for window in [5, 10, 20]:
@@ -275,25 +286,39 @@ class LSTMPreprocessor(BasePreprocessor):
 
     def prepare_data(self, data, target_col='Close'):
         """Complete preprocessing for LSTM."""
+        # Guardar el nombre de la columna de precio
+        self.price_col = target_col
+
+        # Crear una copia para evitar modificar el DataFrame original
+        data_processed = data.copy()
+
         # Base features (minimal)
-        data_processed = self.prepare_base_features(data, target_col)
+        data_processed = self.prepare_base_features(data_processed, self.price_col)
 
-        # Minimal lags (LSTM learns temporal patterns)
-        data_processed = self.add_lags(data_processed, target_col, self.n_lags)
-
-        # LSTM-specific features
+        #  Crear características específicas de LSTM ANTES de los lags
+        # Esto incluye 'log_returns' que será nuestro objetivo
         data_processed = self.add_lstm_specific_features(data_processed)
 
-        # Almacenar el nombre de las columnas de características
-        if target_col in data_processed.columns:
-            self.feature_names = data_processed.drop(columns=[target_col]).columns.tolist()
-        else:
-            # Si por alguna razón no existe la columna objetivo, usar todas las columnas
-            self.feature_names = data_processed.drop(columns=[target_col], errors='ignore').columns.tolist()
+        # Definir la columna objetivo y renombrarla a 'target'
+        # Esto hace que el resto del pipeline sea más genérico
+        data_processed['target'] = data_processed['log_returns']
 
+        # Agregar lags usando la columna de precios, no el objetivo de retornos
+        data_processed = self.add_lags(data_processed, self.price_col, self.n_lags)
+
+        # --- GESTIÓN DE COLUMNAS ---
+        # 1. Guardar los nombres de todas las características ANTES de eliminar las columnas no deseadas
+        #    Se excluye el objetivo 'target' y la columna de precio original.
+        features_to_drop = ['target', self.price_col, 'log_returns', 'returns']
+        self.feature_names = [col for col in data_processed.columns if col not in features_to_drop]
+
+        # 2. Seleccionar solo las características y el objetivo final
+        final_cols = self.feature_names + ['target']
+        data_processed = data_processed[final_cols]
+
+        # 3. Limpiar valores infinitos y NaNs que puedan haber quedado
         data_processed.replace([np.inf, -np.inf], np.nan, inplace=True)
-        # Rellena cualquier NaN restante con 0 (un valor neutral para volatilidades/retornos)
-        data_processed.fillna(0, inplace=True)
+        data_processed.dropna(inplace=True)
 
         print(
             f"LSTM preprocessing completed. Shape: {data_processed.shape}. Feature names count: {len(self.feature_names)}")

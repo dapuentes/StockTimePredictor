@@ -11,27 +11,26 @@ def forecast_future_prices_lstm(
         target_col: str = 'Close'
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Orquesta la predicción de precios futuros utilizando un modelo LSTM entrenado.
-
-    Esta función actúa como un intermediario, llamando al método `predict_future` del
-    modelo, que contiene la lógica compleja de predicción recursiva y el cálculo
-    de intervalos de confianza mediante Monte Carlo Dropout.
+    Forecast future prices using an LSTM model for a given forecast horizon while handling
+    prediction intervals and providing console-based output.
 
     Args:
-        model (TimeSeriesLSTMModel): La instancia del modelo LSTM ya entrenado y cargado.
-        data (pd.DataFrame): El DataFrame con los datos históricos necesarios para iniciar el pronóstico.
-        forecast_horizon (int): El número de días/pasos hacia el futuro a predecir.
-        target_col (str): El nombre de la columna objetivo.
+        model (TimeSeriesLSTMModel): The LSTM model used for forecasting. Must implement a
+            `predict_future` method designed to handle recursive and interval-based predictions.
+        data (pd.DataFrame): A DataFrame containing the historical data required for prediction.
+        forecast_horizon (int): The number of future periods (e.g., days) to forecast. Default is 10.
+        target_col (str): The name of the column in the data representing the target variable
+            to forecast. Default is 'Close'.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray]: Una tupla conteniendo tres arrays de NumPy:
-        - El pronóstico de los puntos principales (predicciones).
-        - Los límites inferiores del intervalo de predicción.
-        - Los límites superiores del intervalo de predicción.
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing three numpy arrays:
+            - The first array represents the forecast values.
+            - The second array represents the lower bounds of the prediction intervals.
+            - The third array represents the upper bounds of the prediction intervals.
     """
     print(f"\n--- Iniciando la llamada al pronóstico para los próximos {forecast_horizon} días ---")
 
-    # 1. Delegar toda la lógica de pronóstico al método del modelo
+
     # Este método ya está diseñado para manejar la recursividad y los intervalos.
     forecast, lower_bounds, upper_bounds = model.predict_future(
         historical_data_df=data,
@@ -39,7 +38,7 @@ def forecast_future_prices_lstm(
         target_col=target_col
     )
 
-    # 2. Imprimir los resultados en la consola para una fácil verificación
+    # Imprimir los resultados en la consola para una fácil verificación
     print(f"\n--- Resultados del Pronóstico (Valores Desescalados) ---")
     for i in range(forecast_horizon):
         print(
@@ -48,5 +47,4 @@ def forecast_future_prices_lstm(
             f"(Intervalo 95%: [{lower_bounds[i]:.4f} - {upper_bounds[i]:.4f}])"
         )
 
-    # 3. Devolver los resultados para que sean procesados por la API
     return forecast, lower_bounds, upper_bounds

@@ -27,7 +27,24 @@ app = FastAPI(
 # --- Modelos Pydantic para los Requests ---
 
 class BaseTrainRequest(BaseModel):
-    """Configuración base para el entrenamiento de modelos."""
+    """
+    Represents a base request model for training operations.
+
+    This class is designed to standardize the input parameters required for 
+    initiating training processes in various machine learning workflows. It 
+    facilitates capturing metadata, preprocessing configurations, and model 
+    storage paths. 
+
+    Attributes:
+        ticket (str): Identifier or code associated with the training request.
+        start_date (str): The starting date for data selection.
+        end_date (str): The ending date for data selection.
+        n_lags (int): Number of time lags to include in preprocessing.
+        target_col (str): Name of the target column for predictions.
+        train_size (float): Proportion of the dataset to be used for training.
+        save_model_path (Optional[str]): Path where the trained model should 
+            be saved. Can be None if saving is not required.
+    """
     ticket: str = "NU"
     start_date: str = "2020-12-10"
     end_date: str = "2024-10-01"
@@ -38,7 +55,22 @@ class BaseTrainRequest(BaseModel):
 
 
 class TrainRequestLSTM(BaseTrainRequest):
-    """Configuración específica para entrenar un modelo LSTM."""
+    """
+    Represents a training request configuration for an LSTM model.
+
+    Encapsulates the configuration details required for training a Long Short-Term 
+    Memory (LSTM) model. This configuration specifies essential parameters such as 
+    sequence length, number of training epochs, the LSTM layer's units, dropout rate, 
+    and optimization behavior. This class is intended to standardize and simplify the 
+    management of LSTM training configurations.
+
+    Attributes:
+        sequence_length (int): Length of the input sequence for the LSTM model.
+        epochs (int): Number of training epochs.
+        lstm_units (int): Number of units (neurons) in the LSTM layer.
+        dropout_rate (float): Fraction of input units to drop for regularization.
+        optimize_params (bool): Indicates whether to optimize hyperparameters.
+    """
     sequence_length: int = 30
     epochs: int = 50
     lstm_units: int = 50
@@ -60,14 +92,33 @@ loaded_lstm_models_cache = {}
 # --- Funciones Auxiliares (Helpers) para el Manejo de Modelos LSTM ---
 
 def get_default_lstm_model_dir(ticket: str) -> str:
-    """Genera la ruta al directorio por defecto para un modelo LSTM de un ticket."""
+    """
+    Generates the default directory path for storing an LSTM model 
+    based on the provided ticket identifier.
+
+    Args:
+        ticket (str): A unique identifier used to construct the directory 
+            name for the LSTM model.
+
+    Returns:
+        str: Absolute path of the default LSTM model directory constructed 
+            using the ticket identifier.
+    """
     return os.path.join(MODEL_DIR, f"lstm_model_{ticket}")
 
 
 def find_lstm_model_dir(ticket: str) -> Optional[str]:
     """
-    Encuentra el directorio de un modelo LSTM entrenado para un ticket.
-    Los modelos LSTM se guardan como directorios.
+    Determines the directory path for the LSTM model associated with a given ticket.
+    If a specific model directory for the given ticket does not exist, it attempts to find an 
+    available fallback LSTM model directory.
+
+    Args:
+        ticket (str): The identifier for which the LSTM model directory should be retrieved.
+
+    Returns:
+        Optional[str]: The absolute path to the LSTM model directory for the given ticket 
+        if found, otherwise None.
     """
     model_dir_path = get_default_lstm_model_dir(ticket)
     if os.path.exists(model_dir_path) and os.path.isdir(model_dir_path):
@@ -84,7 +135,21 @@ def find_lstm_model_dir(ticket: str) -> Optional[str]:
 
 
 def load_lstm_model_from_dir(dir_path: str) -> TimeSeriesLSTMModel:
-    """Carga un modelo TimeSeriesLSTMModel desde el directorio especificado y lo cachea."""
+    """
+    Loads an LSTM model from the specified directory path. If the model has already been
+    loaded previously, the cached instance is returned. Otherwise, the model is loaded,
+    cached, and returned. If an error occurs, the process is logged and an HTTP exception
+    is raised with a detailed error message.
+
+    Args:
+        dir_path (str): The directory path from which the LSTM model should be loaded.
+
+    Returns:
+        TimeSeriesLSTMModel: The loaded LSTM model.
+
+    Raises:
+        HTTPException: If there is an error while loading the model from the directory.
+    """
     if dir_path in loaded_lstm_models_cache:
         return loaded_lstm_models_cache[dir_path]
 
@@ -100,7 +165,28 @@ def load_lstm_model_from_dir(dir_path: str) -> TimeSeriesLSTMModel:
 
 
 def load_stock_data_helper(ticket: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """Función auxiliar para cargar datos de acciones con manejo de errores HTTP."""
+    """
+    Loads stock data for a specified ticker and date range.
+
+    This function retrieves data for the given ticker and date range using the
+    `load_data` function. If the data is empty, it raises an HTTPException with
+    a 404 status code. If any other error occurs during the data loading process,
+    it raises an HTTPException with a 500 status code, along with the error
+    details.
+
+    Args:
+        ticket (str): The ticker symbol for which stock data is to be loaded.
+        start_date (str): The start date for the data range in YYYY-MM-DD format.
+        end_date (str): The end date for the data range in YYYY-MM-DD format.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the stock data for the specified
+        ticker and date range.
+
+    Raises:
+        HTTPException: If no data is found for the provided ticker and date range,
+        or if an unexpected error occurs during the data loading process.
+    """
     try:
         data = load_data(ticker=ticket, start_date=start_date, end_date=end_date)
         if data.empty:
@@ -124,8 +210,32 @@ async def read_root_lstm():
 
 
 @app.post("/train", tags=["LSTM Training & Management"])
-async def train_lstm_endpoint(request: TrainRequestLSTM):
-    """Entrena y guarda un modelo LSTM basado en la configuración proporcionada."""
+async def train_model(request: TrainRequestLSTM):
+    """
+    Handles the LSTM model training process via an API endpoint.
+
+    This function processes a training request for an LSTM (Long Short-Term Memory)
+    model. It validates the input data, handles data preprocessing, initiates the 
+    training of the LSTM model per the client's specifications, and saves the 
+    trained model to a specified directory or a default location. Additionally, 
+    the function generates output metrics and residuals, optionally caches the 
+    trained model, and returns a response containing relevant details about the 
+    training outcome.
+
+    Args:
+        request (TrainRequestLSTM): Object containing all the necessary parameters 
+            for training the LSTM model, such as ticker symbol, date range for 
+            data, model hyperparameters, and save path.
+
+    Returns:
+        dict: Response object containing the status of the training process, model 
+            metrics, save path, residuals, residual dates, and optionally the best 
+            hyperparameters.
+
+    Raises:
+        HTTPException: If there are insufficient historical data rows to train the 
+            model or if an unexpected error occurs during training.
+    """
     try:
         print(f"Solicitud de entrenamiento LSTM recibida para el ticker: {request.ticket}")
         data = load_stock_data_helper(request.ticket, request.start_date, request.end_date)
@@ -186,15 +296,43 @@ async def train_lstm_endpoint(request: TrainRequestLSTM):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error entrenando modelo LSTM: {str(e)}")
 
-
 @app.get("/predict", tags=["LSTM Prediction"])
-async def predict_lstm_endpoint(
+async def predict(
         ticket: str = Query("NU", description="Ticker de la acción a predecir"),
         forecast_horizon: int = Query(10, description="Horizonte de pronóstico en días"),
         target_col: str = Query("Close", description="Columna objetivo para la predicción"),
         history_days: int = Query(365, description="Número de días históricos a devolver en la respuesta")
 ):
-    """Genera un pronóstico usando un modelo LSTM entrenado, incluyendo intervalos de confianza."""
+    """
+    Handles LSTM-based stock price prediction through an API endpoint. Fetches a trained LSTM model, validates
+    input parameters and historical stock data, performs forecasting, and formats the prediction result
+    to return as a JSON response.
+
+    Args:
+        ticket (str): Ticker symbol of the stock for prediction.
+        forecast_horizon (int): Number of days to forecast into the future.
+        target_col (str): Target column to predict within stock data (e.g., 'Close').
+        history_days (int): Number of historical days to include in the response.
+
+    Returns:
+        dict: A dictionary containing the following keys:
+            - "status": A success status message.
+            - "ticker": Ticker of the stock for which prediction was made.
+            - "model_type": Type of model used for prediction ('LSTM').
+            - "target_column": Column for which the prediction was generated.
+            - "forecast_horizon": Forecast horizon in days.
+            - "historical_dates": List of dates for historical data included in the response.
+            - "historical_values": List of values for the target column in historical data.
+            - "predictions": List of forecasted data containing dates, predicted values, and confidence bounds.
+            - "last_actual_date": The last date with actual data from historical dataset.
+            - "last_actual_value": The last recorded value from the historical dataset for the target column.
+            - "model_used": Name of the model directory used for prediction.
+
+    Raises:
+        HTTPException: If there are issues with the input parameters, insufficient historical data, or if the
+                       LSTM model directory is not found.
+        HTTPException: If an internal server error occurs during the prediction process.
+    """
     try:
         print(f"Solicitud de predicción LSTM recibida para el ticker: {ticket}")
         model_dir_path = find_lstm_model_dir(ticket)
@@ -318,7 +456,6 @@ async def health_check_lstm():
     return {"status": "Ok", "service": "LSTM Time Series Model Service"}
 
 
-# --- Punto de Entrada para Uvicorn (si se ejecuta este archivo directamente) ---
 if __name__ == "__main__":
     import uvicorn
 
