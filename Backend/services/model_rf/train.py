@@ -1,4 +1,8 @@
-from .rf_model2 import TimeSeriesRandomForestModel
+from .rf_model import TimeSeriesRandomForestModel
+from utils.preprocessing import scale_data_universal
+from utils.preprocessing import PreprocessorFactory
+from statsmodels.tsa.stattools import acf
+from statsmodels.tsa.stattools import pacf
 
 
 def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_model_path=None):
@@ -31,9 +35,11 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
             The trained time series Random Forest model.
     """
 
-    from utils.preprocessing import scale_data
+    rf_preprocessor = PreprocessorFactory.create_preprocessor(
+        'rf', n_lags=n_lags, use_robust_scaling=False
+    )
 
-    model = TimeSeriesRandomForestModel(n_lags=n_lags)
+    model = TimeSeriesRandomForestModel(preprocessor=rf_preprocessor)
 
     # Preparar los datos
     processed_data = model.prepare_data(data, target_col=target_col)
@@ -63,8 +69,9 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     print(f"names: {X_train.columns.tolist()}")
 
     # Escalar los datos
-    X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler = scale_data(
-        X_train, X_test, y_train, y_test
+    feature_scaler, target_scaler = model.preprocessor.get_scalers()
+    X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, _, _ = scale_data_universal(
+        X_train, X_test, y_train, y_test, feature_scaler, target_scaler
     )
     print(f"Scaled train data shape: {X_train_scaled.shape}")
     print(f"Scaled test data shape: {X_test_scaled.shape}")
@@ -87,7 +94,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
         y_train_pred = model.target_scaler.inverse_transform(y_train_pred_scaled.reshape(-1, 1)).ravel()
     else:
         y_train_pred = y_train_pred_scaled
-
+    
     from utils.evaluation import evaluate_regression
     train_metrics = evaluate_regression(y_train.flatten(), y_train_pred)
     print(f"Train metrics: {train_metrics}")
@@ -95,6 +102,13 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     # Residuales
     residuals = y_train.flatten() - y_train_pred
     residuals_dates = test_data.index.tolist()
+
+    # Lags del acf y pacf
+    nlags = 40
+
+    acf_values, confint_acf = acf(residuals, nlags=nlags, alpha=0.05)
+
+    pacf_values, confint_pacf = pacf(residuals, nlags=nlags, alpha=0.05)
 
     # Evaluar el modelo
     model.evaluate(X_test_scaled, y_test)
@@ -105,4 +119,4 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
         model.save_model(save_model_path, training_end_date)
         print(f"Model saved to {save_model_path}")
 
-    return model, feature_names, residuals, residuals_dates
+    return model, feature_names, residuals, residuals_dates, acf_values, pacf_values, confint_acf, confint_pacf

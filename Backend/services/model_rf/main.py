@@ -7,7 +7,7 @@ import glob
 from datetime import datetime, timedelta
 
 # Importar módulos personalizados
-from Backend.services.model_rf.rf_model2 import TimeSeriesRandomForestModel
+from Backend.services.model_rf.rf_model import TimeSeriesRandomForestModel
 from Backend.services.model_rf.train import train_ts_model
 from Backend.services.model_rf.forecast import forecast_future_prices
 from Backend.utils.import_data import load_data
