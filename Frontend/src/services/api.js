@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // URL del API Gateway
-const API_GATEWAY_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_GATEWAY_URL = 'http://localhost:8000'; // Ajusta si tu gateway corre en otro puerto
 
 /**
  * Trains a machine learning model using the specified configuration and model type.
@@ -17,7 +17,7 @@ const API_GATEWAY_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000'
  * @param {string} [config.targetCol='Close'] - The target column to predict (e.g., "Close", "Open").
  * @param {number} [config.trainSize=0.8] - The proportion of data to use for training (between 0 and 1).
  * @throws {Error} Throws an error if required configuration fields are missing or if the training request fails.
- * @returns {Promise<Object>} A promise that resolves to the response data from the training API,
+ * @returns {Promise<Object>} A promise that resolves to the response data from the training API, 
  * containing details such as metrics, best parameters, and the model path.
  */
 export const trainModel = async (modelType, config) => {

@@ -3,15 +3,21 @@ import { Table, Tag } from 'antd';
 import dayjs from 'dayjs';
 
 /**
- * Component for rendering a comparison table of model results.
- * It accepts a "results" object containing data for several models,
- * processes it, and displays key metrics such as MAPE, RMSE, MAE,
- * and additional details in a sortable table format.
+ * Component to render a comparison table for machine learning models.
  *
  * @param {Object} props - The component props.
- * @param {Object} props.results - An object containing model data where keys are unique identifiers and values
- *                                  include details such as modelType, ticker, dateRange, metrics, and timestamp.
- * @return {JSX.Element} A table displaying the comparison of models based on various metrics and attributes.
+ * @param {Object} props.results - An object containing the results data for the models.
+ * @param {Object} props.results[].metrics - Metrics associated with the model.
+ * @param {number} props.results[].metrics.MAPE - Mean Absolute Percentage Error (MAPE) of the model.
+ * @param {number} props.results[].metrics.RMSE - Root Mean Square Error (RMSE) of the model.
+ * @param {number} props.results[].metrics.MAE - Mean Absolute Error (MAE) of the model.
+ * @param {string} props.results[].modelType - The type of the model.
+ * @param {string} props.results[].ticker - The ticker symbol associated with the model.
+ * @param {string} props.results[].dateRange - The date range for the model's data.
+ * @param {string} props.results[].timestamp - The timestamp when the model was trained.
+ * @param {string} props.results[].modelPath - The file path to the model.
+ *
+ * @returns {JSX.Element} A table displaying the comparison of models with sortable columns and formatted metrics.
  */
 function ModelComparisonTable({ results }) {
      // Convertir el objeto results a un array para la tabla

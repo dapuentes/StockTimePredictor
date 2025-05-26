@@ -1,19 +1,33 @@
 import { useMutation } from '@tanstack/react-query';
 import { trainModel, generateForecast } from '../services/api';
-import { message } from 'antd';
+import { message } from 'antd'; 
 
 // Hook para la mutación de entrenamiento
 /**
- * Custom hook to create a mutation for training a model. It manages the state and logic around
- * the training process, including API calls, loading messages, and error handling.
- *
- * @param {Object} [options={}] Optional parameters to configure the mutation behavior.
- * @param {Function} [options.onSuccessCallback] Callback function executed after successful mutation.
- * @param {Function} [options.onErrorCallback] Callback function executed after a failed mutation.
- * @param {Function} [options.onSettledCallback] Callback function executed after the mutation completes, regardless of success or error.
- * @param {Object} [options.otherOptions] Additional options to customize the mutation.
- *
- * @return {Object} Returns an object from `useMutation` hook that includes methods and state for executing and tracking the mutation.
+ * Custom hook to handle the mutation for training a machine learning model.
+ * 
+ * This hook uses `useMutation` to manage the API call for training a model and provides
+ * lifecycle callbacks for handling loading, success, error, and settled states.
+ * 
+ * @param {Object} [options={}] - Optional configuration for the mutation.
+ * @param {Function} [options.onSuccessCallback] - Callback function to execute on successful mutation.
+ * @param {Function} [options.onErrorCallback] - Callback function to execute on mutation error.
+ * @param {Function} [options.onSettledCallback] - Callback function to execute when the mutation is settled (either success or error).
+ * @param {...Object} [options] - Additional options to pass to the `useMutation` hook.
+ * 
+ * @returns {Object} - The mutation object returned by `useMutation`, including methods like `mutate` and `mutateAsync`.
+ * 
+ * @example
+ * const { mutate } = useTrainModelMutation({
+ *   onSuccessCallback: (data, variables) => {
+ *     console.log('Model trained successfully:', data);
+ *   },
+ *   onErrorCallback: (error) => {
+ *     console.error('Error training model:', error);
+ *   },
+ * });
+ * 
+ * mutate({ modelType: 'neural-network', config: { epochs: 10 } });
  */
 export function useTrainModelMutation(options = {}) {
     return useMutation({
@@ -44,14 +58,22 @@ export function useTrainModelMutation(options = {}) {
 
 // Hook para la mutación de pronóstico
 /**
- * Custom hook for triggering a forecast generation mutation.
+ * Custom hook to handle the generation of forecasts using a mutation.
  *
- * @param {Object} [options={}] Configuration options for customizing the mutation behavior.
- * @param {Function} [options.onSuccessCallback] Optional callback invoked upon a successful mutation.
- * @param {Function} [options.onErrorCallback] Optional callback invoked if the mutation fails.
- * @param {Function} [options.onSettledCallback] Optional callback invoked when the mutation is settled, whether successful or failed.
+ * @param {Object} [options={}] - Optional configuration for the mutation.
+ * @param {Function} [options.onSuccessCallback] - Callback function to execute on successful mutation.
+ * @param {Function} [options.onErrorCallback] - Callback function to execute on mutation error.
+ * @param {Function} [options.onSettledCallback] - Callback function to execute when the mutation is settled (either success or error).
+ * @returns {Object} - The mutation object returned by `useMutation`.
  *
- * @return {Object} Returns the mutation object with functions and state, allowing you to trigger the mutation and monitor its status.
+ * @example
+ * const { mutate, isLoading } = useGenerateForecastMutation({
+ *   onSuccessCallback: (data) => console.log('Forecast generated:', data),
+ *   onErrorCallback: (error) => console.error('Error generating forecast:', error),
+ *   onSettledCallback: () => console.log('Mutation settled'),
+ * });
+ *
+ * mutate({ modelType: 'linear', config: { param1: 'value1' } });
  */
 export function useGenerateForecastMutation(options = {}) {
      return useMutation({

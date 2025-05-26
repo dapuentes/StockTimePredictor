@@ -12,7 +12,7 @@ function HelpModal({ visible, onClose }) {
             <Panel header="Configuración de Parámetros" key="1">
               <Paragraph><Text strong>Ticker:</Text> Símbolo de la acción (ej. AAPL, NU).</Paragraph>
                 <Paragraph><Text strong>Rango de Fechas:</Text> Selecciona el rango de fechas para el entrenamiento del modelo.</Paragraph>
-                <Paragraph><Text strong>Modelo:</Text> Selecciona el tipo de modelo a utilizar (ej. ARIMA, LSTM).</Paragraph>
+                <Paragraph><Text strong>Modelo:</Text> Selecciona el tipo de modelo a utilizar (ej. RF, LSTM).</Paragraph>
                 <Paragraph><Text strong>Número de Lags:</Text> Número de lags a considerar en el modelo.</Paragraph>
                 <Paragraph><Text strong>Horizonte de Pronóstico:</Text> Número de días a pronosticar.</Paragraph>
             </Panel>

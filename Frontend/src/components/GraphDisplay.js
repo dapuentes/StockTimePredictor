@@ -12,7 +12,8 @@ import {
   Title,
   Tooltip,
   Legend,
-  TimeScale
+  TimeScale,
+  Filler
 } from 'chart.js';
 import annotationPlugin from 'chartjs-plugin-annotation'; // Plugin de anotaciones
 import 'chartjs-adapter-date-fns'; // Adaptador para fechas
@@ -29,26 +30,10 @@ ChartJS.register(
   Legend,
   TimeScale, // Registrar escala de tiempo
   zoomPlugin, // Registrar plugin de zoom
-  annotationPlugin
+  annotationPlugin,
+  Filler
 );
 
-/**
- * Renders a line chart displaying historical data and forecast predictions for a stock or asset.
- * The chart can include historical prices, forecasted values, and confidence interval boundaries.
- * Additionally, provides tools to reset zoom and export the chart as an image.
- *
- * @param {Object} param0 - The parameter object.
- * @param {Object} param0.historicalData - Historical data for the asset, including dates and values.
- * @param {string[]} param0.historicalData.dates - Array of historical data dates in string format.
- * @param {number[]} param0.historicalData.values - Array of historical data values corresponding to the dates.
- * @param {Object[]} param0.forecastData - Array of forecasted data points, each with prediction and confidence intervals.
- * @param {string} param0.forecastData[].date - Date of the forecasted data point in string format.
- * @param {number} param0.forecastData[].prediction - Forecasted value for the corresponding date.
- * @param {number} [param0.forecastData[].lower_bound] - Lower bound of the confidence interval, if available.
- * @param {number} [param0.forecastData[].upper_bound] - Upper bound of the confidence interval, if available.
- * @param {string} param0.ticker - The stock or asset ticker symbol.
- * @return {JSX.Element} The rendered chart component containing the historical and forecasted data visualization.
- */
 function GraphDisplay({ historicalData, forecastData, ticker }) {
     const chartRef = useRef(null);
 
@@ -68,7 +53,7 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
     const historicalMap = new Map(
         hasHistoricalData ? historicalData.dates.map((d, i) => [d, historicalData.values[i]]) : []
     );
-
+    
     const forecastPredictionMap = new Map(
         hasForecastData ? forecastData.map(p => [p.date, p.prediction]) : []
     );
@@ -92,11 +77,11 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
     if (hasHistoricalData) {
          chartData.datasets.push({
             label: `Precio Histórico (${ticker})`,
-            data: historicalMappedValues,
+            data: historicalMappedValues, 
             borderColor: 'rgb(75, 192, 192)',
             backgroundColor: 'rgba(75, 192, 192, 0.5)',
             tension: 0.1,
-            pointRadius: 1,
+            pointRadius: 1, 
             pointHitRadius: 10,
             fill: false
         });
@@ -106,33 +91,33 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
         const hasCIData = forecastData.some(p => p.lower_bound !== undefined && p.upper_bound !== undefined);
         if (hasCIData) {
             chartData.datasets.push({
-                label: 'Límite Inferior IC',
+                label: 'Límite Inferior IC', 
                 data: forecastMappedLowerBound,
                 borderColor: 'transparent',
-                borderWidth: 0,
+                borderWidth: 0, 
                 pointRadius: 0,
-                fill: '-1'
+                fill: false
             });
 
             chartData.datasets.push({
-                label: 'Límite Superior IC',
-                data: forecastMappedUpperBound,
-                borderColor: 'transparent',
-                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                label: 'Límite Superior IC', 
+                data: forecastMappedUpperBound, 
+                borderColor: 'transparent', 
+                backgroundColor: 'rgba(255, 99, 132, 0.2)', 
                 borderWidth: 1,
                 pointRadius: 0,
-                fill: '-1',
+                fill: '-1', 
             });
         }
 
         chartData.datasets.push({
             label: 'Pronóstico',
-            data: forecastMappedPredictions,
+            data: forecastMappedPredictions, 
             borderColor: 'rgb(255, 99, 132)',
             backgroundColor: 'rgba(255, 99, 132, 0.5)',
             borderDash: [5, 5], // Línea punteada
             tension: 0.1,
-            pointRadius: 2,
+            pointRadius: 2, 
             pointHitRadius: 10,
             fill: false
         });
@@ -162,10 +147,10 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
         plugins: {
             legend: { position: 'top' },
             title: { display: true, text: `Serie de Tiempo y Pronóstico para ${ticker}` },
-            zoom: {
+            zoom: { 
                 pan: {
                     enabled: true, // Habilitar paneo (mover el gráfico)
-                    mode: 'xy',
+                    mode: 'xy',   
                     threshold: 5, // Píxeles a mover antes de iniciar paneo
                 },
                 zoom: {
@@ -175,13 +160,13 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
                     pinch: {
                         enabled: true // Habilitar zoom con "pellizco" en táctiles
                     },
-                    mode: 'xy',
+                    mode: 'xy', 
                 },
-                limits: {
+                limits: { 
                     x: {min: 'original', max: 'original'},
                     y: {min: 'original', max: 'original'}
                 }
-            }
+            } 
         },
         scales: {
         },
@@ -197,9 +182,9 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
             <Button
                 icon={<ReloadOutlined />}
                 onClick={handleResetZoom}
-                style={{ position: 'absolute', top: '20px', right: '10px', zIndex: 10 }}
+                style={{ position: 'absolute', top: '20px', right: '10px', zIndex: 10 }} 
                 size="small"
-                title="Restablecer Zoom"
+                title="Restablecer Zoom" 
              />
             <Button
                 icon={<CameraOutlined />}
@@ -209,14 +194,14 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
                 title="Exportar Imagen"
             />
              <Line
-                ref={chartRef}
+                ref={chartRef} 
                 options={options}
                 data={chartData}
                 key={ticker + (historicalData?.dates?.length || 0) + (forecastData?.length || 0)}
              />
         </div>
     );
-
+    
 }
 
 export default GraphDisplay;
