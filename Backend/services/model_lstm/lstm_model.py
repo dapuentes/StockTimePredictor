@@ -463,30 +463,44 @@ class TimeSeriesLSTMModel:
         print("\n--- Pronóstico futuro completado ---")
         return np.array(final_predictions), np.array(final_lower_bounds), np.array(final_upper_bounds)
 
-    def evaluate(self, X_test, y_test):
+    def evaluate(self, X_test_seq, y_test_seq, previous_prices_for_eval, y_test_actual_for_eval, price_col_name):
         """
-        Evaluates the performance of a regression model using test data. The method
-        predicts the target values for the test dataset, rescales both the predicted
-        and true target values back to their original scale, and calculates evaluation
-        metrics.
-
-        Args:
-            X_test: Test dataset features used for predicting outcomes.
-            y_test: True target values corresponding to the test features.
-
-        Returns:
-            dict: A dictionary containing evaluation metrics for the regression model.
+        Evaluates the performance of the LSTM regression model on test data by predicting log returns,
+        rescaling them to the original scale, reconstructing predicted and true prices, and computing
+        evaluation metrics.
+        
+            - X_test_seq (np.ndarray): Test dataset features for sequence prediction.
+            - y_test_seq (np.ndarray): True target values (scaled) for the test features.
+            previous_prices_for_eval (np.ndarray): Array of previous prices used to reconstruct predicted and true prices.
+            - y_test_actual_for_eval (np.ndarray): Actual log returns (unscaled) for evaluation.
+            - price_col_name (str): Name of the price column (for reference or logging).
+            - dict: Dictionary containing evaluation metrics (e.g., MAE, RMSE, R2) for the regression model based on reconstructed prices.
+        Raises:
+            ValueError: If the length of 'previous_prices_for_eval' and 'y_pred_log_returns' do not match.
         """
         from utils.evaluation import evaluate_regression
 
-        y_pred_scaled = self.predict(X_test)
+        print(" -> Realizando predicciones sobre el conjunto de prueba...")
 
-        # Desescalar tanto 'y_test' como 'y_pred' para la evaluación
-        y_test_orig = self.target_scaler.inverse_transform(y_test)
-        y_pred_orig = self.target_scaler.inverse_transform(y_pred_scaled)
+        # Predecir los retornos logarítmicos escalados
+        y_pred_scaled = self.predict(X_test_seq)
+        
+        # Desescalar las predicciones para obtener los retornos logarítmicos
+        y_pred_log_returns = self.target_scaler.inverse_transform(y_pred_scaled).flatten()
+        
+        # Los `y_test_actual_for_eval` ya son los retornos logarítmicos reales sin escalar
+        y_true_log_returns = y_test_actual_for_eval
+        
+        # Reconstruir los precios predichos y los precios reales
+        if len(previous_prices_for_eval) != len(y_pred_log_returns):
+            raise ValueError("La longitud de 'previous_prices_for_eval' y 'y_pred_log_returns' no coincide.")
 
-        # Cuidado, en este caso el MAPE es poco interpretativo porque se calcula sobre el logaritmo de retornos
-        self.metrics = evaluate_regression(y_test_orig.flatten(), y_pred_orig.flatten())
+        y_pred_price = previous_prices_for_eval * np.exp(y_pred_log_returns)
+        y_true_price = previous_prices_for_eval * np.exp(y_true_log_returns)
+        
+        print(" -> Calculando métricas sobre los precios reconstruidos...")
+        # Calcular métricas sobre los precios, que son mucho más interpretables
+        self.metrics = evaluate_regression(y_true_price, y_pred_price)
         return self.metrics
 
     def save_model(self, dir_path):

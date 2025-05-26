@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping
+from statsmodels.tsa.stattools import acf
+from statsmodels.tsa.stattools import pacf
 
 from utils.preprocessing import PreprocessorFactory
 from .lstm_model import TimeSeriesLSTMModel
@@ -23,7 +25,7 @@ def train_lstm_model(
         batch_size: int = 32,
         optimize_params: bool = True,
         save_model_path: str = None,
-        # ¡NUEVO! Añadir parámetro de paciencia
+        # Añadir parámetro de paciencia
         patience: int = 10
 ):
     """
@@ -79,7 +81,6 @@ def train_lstm_model(
 
     if invalid_cols:
         print(f"   -> ¡ERROR! Se encontraron valores NaN o Inf en las siguientes columnas: {invalid_cols}")
-        # Opcional: imprimir las filas con problemas para más detalle
         print("   -> Mostrando algunas de las filas problemáticas:")
         print(processed_data[processed_data.isin([np.nan, np.inf, -np.inf]).any(axis=1)])
         raise ValueError(f"Procesamiento fallido. Columnas con valores inválidos: {invalid_cols}")
@@ -190,30 +191,13 @@ def train_lstm_model(
     print("\n8. Evaluando el modelo final en el conjunto de prueba...")
     model.evaluate(X_test_seq, y_test_seq)
     print(f"   -> Métricas finales del modelo: {model.metrics}")
-    '''
-    import matplotlib.pyplot as plt
-    import statsmodels.graphics.tsaplots as sgt
 
-    residuals_train = np.array(residuals_train)
+    # Lags del acf y pacf
+    nlags = 40
 
-    # --- Gráfico ACF de los Residuales ---
-    plt.figure(figsize=(12, 6))
-    sgt.plot_acf(residuals_train, lags=40, zero=False) # 'lags' es el número de retardos a mostrar
-    plt.title('Función de Autocorrelación (ACF) de los Residuales del Modelo LSTM')
-    plt.xlabel('Retardo (Lag)')
-    plt.ylabel('Autocorrelación')
-    plt.grid(True)
-    plt.show()
+    acf_values, confint_acf = acf(residuals_train, nlags=nlags, alpha=0.05)
 
-    # --- Gráfico PACF de los Residuales ---
-    plt.figure(figsize=(12, 6))
-    sgt.plot_pacf(residuals_train, lags=40, zero=False, method='ols') # 'method' puede variar, 'ols' es común
-    plt.title('Función de Autocorrelación Parcial (PACF) de los Residuales del Modelo LSTM')
-    plt.xlabel('Retardo (Lag)')
-    plt.ylabel('Autocorrelación Parcial')
-    plt.grid(True)
-    plt.show()
-    '''
+    pacf_values, confint_pacf = pacf(residuals_train, nlags=nlags, alpha=0.05)
 
     # Guardar el modelo si se proporciona una ruta
     if save_model_path:
@@ -221,4 +205,4 @@ def train_lstm_model(
         model.save_model(save_model_path)
 
     print("\n--- Pipeline de Entrenamiento LSTM Completado Exitosamente ---")
-    return model, residuals_train, residual_dates_train
+    return model, residuals_train, residual_dates_train, acf_values, pacf_values, confint_acf, confint_pacf

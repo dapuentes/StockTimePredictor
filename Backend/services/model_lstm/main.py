@@ -253,7 +253,7 @@ async def train_model(request: TrainRequestLSTM):
             )
 
         print(f"Iniciando entrenamiento del modelo LSTM. Se guardará en: {save_dir}")
-        trained_model, residuals, residual_dates = train_lstm_model(
+        trained_model, residuals, residual_dates, acf_vals, pacf_vals, confint_acf, confint_pacf = train_lstm_model(
             data=data,
             target_col=request.target_col,
             sequence_length=request.sequence_length,
@@ -270,13 +270,23 @@ async def train_model(request: TrainRequestLSTM):
         loaded_lstm_models_cache[save_dir] = trained_model
 
         response = {
-            "status": "success",
-            "message": f"Modelo LSTM entrenado exitosamente para {request.ticket}",
-            "model_type": "LSTM",
-            "metrics": trained_model.metrics if hasattr(trained_model, 'metrics') else "Métricas no disponibles.",
-            "model_path": os.path.basename(save_dir),
-            "residuals": residuals.tolist(),
-            "residual_dates": residual_dates.strftime('%Y-%m-%d').tolist(),
+        "status": "success",
+        "message": f"Modelo LSTM entrenado exitosamente para {request.ticket}",
+        "model_type": "LSTM",
+        "metrics": trained_model.metrics if hasattr(trained_model, 'metrics') else "Métricas no disponibles.",
+        "model_path": os.path.basename(save_dir),
+        "residuals": residuals.tolist(),
+        "residual_dates": residual_dates.strftime('%Y-%m-%d').tolist(),
+        "acf" : {
+            "values": acf_vals.tolist(),
+            "confint_lower": confint_acf[:, 0].tolist(),
+            "confint_upper": confint_acf[:, 1].tolist()
+            },
+        "pacf": {
+            "values": pacf_vals.tolist(),
+            "confint_lower": confint_pacf[:, 0].tolist(),
+            "confint_upper": confint_pacf[:, 1].tolist()
+            }
         }
 
         # Añadir los mejores parámetros a la respuesta si el atributo existe y no está vacío
