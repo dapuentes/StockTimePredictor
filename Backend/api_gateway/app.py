@@ -9,7 +9,8 @@ app = FastAPI(title="API Gateway", version="1.0.0")
 
 # Configuración de CORS para permitir solicitudes desde cualquier origen
 origins = [
-    "http://localhost:3000"  # Frontend local
+    "http://localhost:3000",  # Frontend local
+    "https://stocktimepredictor.netlify.app",  # Frontend desplegado en Netlify
 ]
 
 app.add_middleware(

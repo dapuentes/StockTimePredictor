@@ -25,8 +25,9 @@ def train_lstm_model(
         batch_size: int = 32,
         optimize_params: bool = True,
         save_model_path: str = None,
-        # Añadir parámetro de paciencia
-        patience: int = 10
+        patience: int = 10,
+        # --- Parámetros de Guardado ---
+        bucket_name: str = None 
 ):
     """
     Trains and optimizes a Long Short-Term Memory (LSTM) model for time series forecasting.
@@ -66,7 +67,8 @@ def train_lstm_model(
     model = TimeSeriesLSTMModel(
         preprocessor=lstm_preprocessor,
         lstm_units=lstm_units,
-        dropout_rate=dropout_rate
+        dropout_rate=dropout_rate,
+        bucket_name=bucket_name
     )
 
     # Preparar las características (features)

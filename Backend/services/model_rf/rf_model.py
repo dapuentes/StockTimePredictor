@@ -39,7 +39,8 @@ class TimeSeriesRandomForestModel:
                  min_samples_split=2,
                  min_samples_leaf=1,
                  max_features='log2',
-                 n_lags=10
+                 n_lags=10,
+                 bucket_name: str = None
                  ):
         """
         Initializes the object with the given parameters to configure the
@@ -75,6 +76,11 @@ class TimeSeriesRandomForestModel:
         self.target_scaler = None
         self.best_pipeline_ = None
         self.feature_names = None
+        self.selected_feature_names_ = None # Para guardar las características seleccionadas
+        self.metrics = None # Para guardar las métricas de evaluación
+
+        # Configuración de GCS
+        self.bucket_name = bucket_name
 
     def prepare_data(self, data, target_col='Close'):
         """
@@ -436,56 +442,186 @@ class TimeSeriesRandomForestModel:
         print("--- Saliendo de predict_future ---")
         return predictions_unscaled, lower_bounds_unscaled, upper_bounds_unscaled
 
-    def save_model(self, model_path="models/model.joblib", training_end_date=None):
-        """
-        Guardar el modelo entrenado en un archivo
+    def _get_metadata(self, training_end_date=None):
+        """Helper para generar el diccionario de metadatos."""
+        # Convertir best_params_ a un formato serializable si contiene objetos numpy
+        serializable_best_params = {}
+        if self.best_params_:
+            for k, v in self.best_params_.items():
+                if isinstance(v, (np.integer, np.int_)):
+                    serializable_best_params[k] = int(v)
+                elif isinstance(v, (np.floating, np.float_)):
+                    serializable_best_params[k] = float(v)
+                elif isinstance(v, np.ndarray):
+                    serializable_best_params[k] = v.tolist()
+                elif isinstance(v, list) and any(isinstance(i, (np.integer, np.int_, np.floating, np.float_)) for i in v):
+                     serializable_best_params[k] = [int(i) if isinstance(i, (np.integer, np.int_)) else float(i) if isinstance(i, (np.floating, np.float_)) else i for i in v]
+                else:
+                    serializable_best_params[k] = v
+        
+        feature_importances_list = None
+        if self.feature_importances_ is not None:
+             feature_importances_list = [float(imp) for imp in self.feature_importances_]
 
-        Parámetros:
-        - model_path: Ruta del archivo para guardar el modelo (el valor predeterminado es 'models/model.joblib')
-        """
 
-        # Asegurarse de que el directorio de destino existe
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-
-        # Guardar el modelo
-        joblib.dump(self, model_path)
-
-        # Guardar metadatos del modelo
-        metadata = {
-            'best_params': self.best_params_,
-            'feature_importances': self.feature_importances_.tolist() if self.feature_importances_ is not None else None,
-            'metrics': self.metrics,
+        return {
+            'model_type': 'TimeSeriesRandomForestModel', # Añadir tipo de modelo
+            'n_lags': self.n_lags,
+            'best_params': serializable_best_params,
+            'feature_importances': feature_importances_list,
+            'metrics': self.metrics, # Asumiendo que self.metrics ya es serializable
             'timestamp': pd.Timestamp.now().isoformat(),
-            'training_end_date': training_end_date
+            'training_end_date': training_end_date,
+            'feature_names': self.feature_names, # Lista de strings
+            'selected_feature_names': self.selected_feature_names_ # Lista de strings
         }
 
-        # Generar la ruta para los metadatos, reemplazando la extensión
-        if model_path.endswith('.joblib'):
-            metadata_file = model_path.replace('.joblib', '_metadata.json')
-        elif model_path.endswith('.pkl'):
-            metadata_file = model_path.replace('.pkl', '_metadata.json')
+    def _get_metadata_path(self, model_file_path):
+        """Helper para obtener la ruta del archivo de metadatos."""
+        if model_file_path.endswith('.joblib'):
+            return model_file_path.replace('.joblib', '_metadata.json')
+        elif model_file_path.endswith('.pkl'):
+            return model_file_path.replace('.pkl', '_metadata.json')
         else:
-            metadata_file = model_path + '_metadata.json'
+            return model_file_path + '_metadata.json'
 
-        with open(metadata_file, 'w') as f:
-            json.dump({k: str(v) if not isinstance(v, (int, float)) else v
-                       for k, v in metadata.items()}, f, indent=4)
+    def save_model(self, model_path="models/rf_model.joblib", training_end_date=None, bucket_name_override=None):
+        """
+        Guarda el modelo entrenado y sus metadatos en Google Cloud Storage o localmente.
+        Utiliza self.bucket_name si está configurado, o bucket_name_override si se proporciona.
+        """
+        active_bucket_name = bucket_name_override if bucket_name_override is not None else self.bucket_name
+
+        # Crear el objeto self (modelo completo) para guardar
+        model_to_save = {
+            'pipeline': self.best_pipeline_,
+            'feature_scaler': self.feature_scaler,
+            'target_scaler': self.target_scaler,
+            'feature_names': self.feature_names,
+            'selected_feature_names': self.selected_feature_names_,
+            'n_lags': self.n_lags,
+            'best_params': self.best_params_, # Ya debería ser serializable por _get_metadata
+            'feature_importances': self.feature_importances_.tolist() if self.feature_importances_ is not None else None,
+            'metrics': self.metrics
+        }
+
+
+        if active_bucket_name and GCS_AVAILABLE:
+            try:
+                client = storage.Client()
+                bucket = client.bucket(active_bucket_name)
+
+                # Serializar el modelo a bytes en memoria
+                with BytesIO() as model_buffer:
+                    joblib.dump(model_to_save, model_buffer)
+                    model_buffer.seek(0)
+                    model_blob = bucket.blob(model_path)
+                    model_blob.upload_from_file(model_buffer, content_type='application/octet-stream')
+                print(f"Modelo guardado en GCS: gs://{active_bucket_name}/{model_path}")
+
+                # Guardar metadatos
+                metadata = self._get_metadata(training_end_date)
+                metadata_path = self._get_metadata_path(model_path)
+                metadata_json = json.dumps(metadata, indent=4)
+                metadata_blob = bucket.blob(metadata_path)
+                metadata_blob.upload_from_string(metadata_json, content_type='application/json')
+                print(f"Metadatos guardados en GCS: gs://{active_bucket_name}/{metadata_path}")
+
+            except Exception as e:
+                print(f"Error al guardar en GCS: {e}. Guardando localmente como fallback.")
+                self._save_locally(model_to_save, model_path, training_end_date)
+        else:
+            if active_bucket_name and not GCS_AVAILABLE:
+                print("Advertencia: Se especificó bucket_name pero google-cloud-storage no está disponible. Guardando localmente.")
+            self._save_locally(model_to_save, model_path, training_end_date)
+
+    def _save_locally(self, model_obj_to_save, model_file_path, training_end_date=None):
+        """Guarda el modelo y metadatos localmente."""
+        # Asegurar que el directorio local exista
+        local_dir = os.path.dirname(model_file_path)
+        if local_dir and not os.path.exists(local_dir):
+            os.makedirs(local_dir, exist_ok=True)
+        
+        joblib.dump(model_obj_to_save, model_file_path)
+        print(f"Modelo guardado localmente: {model_file_path}")
+
+        # Guardar metadatos localmente
+        metadata = self._get_metadata(training_end_date)
+        metadata_path = self._get_metadata_path(model_file_path)
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
+        print(f"Metadatos guardados localmente: {metadata_path}")
+
 
     @classmethod
-    def load_model(cls, model_path):
+    def load_model(cls, model_path, bucket_name=None):
         """
-        Loads and returns a machine learning model from a specified file path.
-
-        This method is a class method that uses the joblib library to deserialize
-        and load a previously saved model. The model file must be a valid file
-        supported by joblib.
-
-        Args:
-            model_path (str): The file path to the serialized model file.
-
-        Returns:
-            Any: The deserialized model object loaded from the specified file.
+        Carga un modelo desde Google Cloud Storage o sistema de archivos local.
         """
-        return joblib.load(model_path)
+        if bucket_name and GCS_AVAILABLE:
+            try:
+                client = storage.Client()
+                bucket = client.bucket(bucket_name)
+                model_blob = bucket.blob(model_path)
 
+                if not model_blob.exists():
+                    raise FileNotFoundError(f"El modelo no existe en GCS: gs://{bucket_name}/{model_path}")
 
+                with BytesIO() as model_buffer:
+                    model_blob.download_to_file(model_buffer)
+                    model_buffer.seek(0)
+                    loaded_data = joblib.load(model_buffer)
+                
+                print(f"Modelo cargado desde GCS: gs://{bucket_name}/{model_path}")
+
+            except Exception as e:
+                print(f"Error al cargar desde GCS: {e}. Intentando cargar localmente como fallback.")
+                return cls._load_locally(model_path) # Llama al método de carga local
+        else:
+            if bucket_name and not GCS_AVAILABLE:
+                print("Advertencia: Se especificó bucket_name pero google-cloud-storage no está disponible. Cargando localmente.")
+            return cls._load_locally(model_path) # Llama al método de carga local
+
+        # Crear una instancia de la clase y poblarla
+        # El constructor de cls() necesita los parámetros n_lags, etc.
+        # O podemos asumir que loaded_data contiene todo lo necesario.
+        instance = cls(n_lags=loaded_data.get('n_lags', 10), bucket_name=bucket_name) # Valor por defecto para n_lags
+        
+        instance.best_pipeline_ = loaded_data.get('pipeline')
+        instance.feature_scaler = loaded_data.get('feature_scaler')
+        instance.target_scaler = loaded_data.get('target_scaler')
+        instance.feature_names = loaded_data.get('feature_names')
+        instance.selected_feature_names_ = loaded_data.get('selected_feature_names')
+        instance.best_params_ = loaded_data.get('best_params')
+        instance.feature_importances_ = np.array(loaded_data.get('feature_importances')) if loaded_data.get('feature_importances') is not None else None
+        instance.metrics = loaded_data.get('metrics')
+        
+        # Si el pipeline tiene el modelo RF, asignarlo a self.model para consistencia (opcional)
+        if instance.best_pipeline_ and 'rf' in instance.best_pipeline_.named_steps:
+            instance.model = instance.best_pipeline_.named_steps['rf']
+            
+        return instance
+
+    @classmethod
+    def _load_locally(cls, model_file_path):
+        """Carga el modelo y metadatos localmente."""
+        if not os.path.exists(model_file_path):
+            raise FileNotFoundError(f"El archivo del modelo no existe localmente: {model_file_path}")
+        
+        loaded_data = joblib.load(model_file_path)
+        print(f"Modelo cargado localmente: {model_file_path}")
+        
+        # Reconstruir la instancia de la clase
+        instance = cls(n_lags=loaded_data.get('n_lags', 10)) # Asumir n_lags o leer de metadatos si se guardó allí
+        instance.best_pipeline_ = loaded_data.get('pipeline')
+        instance.feature_scaler = loaded_data.get('feature_scaler')
+        instance.target_scaler = loaded_data.get('target_scaler')
+        instance.feature_names = loaded_data.get('feature_names')
+        instance.selected_feature_names_ = loaded_data.get('selected_feature_names')
+        instance.best_params_ = loaded_data.get('best_params')
+        instance.feature_importances_ = np.array(loaded_data.get('feature_importances')) if loaded_data.get('feature_importances') is not None else None
+        instance.metrics = loaded_data.get('metrics')
+
+        if instance.best_pipeline_ and 'rf' in instance.best_pipeline_.named_steps:
+            instance.model = instance.best_pipeline_.named_steps['rf']
+        return instance

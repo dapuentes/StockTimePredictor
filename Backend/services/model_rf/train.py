@@ -5,7 +5,7 @@ from statsmodels.tsa.stattools import acf
 from statsmodels.tsa.stattools import pacf
 
 
-def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_model_path=None):
+def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_model_path=None, bucket_name=None):
     """
     Trains a time series forecasting model using a Random Forest algorithm.
 
@@ -115,8 +115,12 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     print(f"Model metrics: {model.metrics}")
 
     if save_model_path is not None:
-        training_end_date = data.index[-1].strftime("%Y-%m-%d")  # Ultima fecha de entrenamiento
-        model.save_model(save_model_path, training_end_date)
-        print(f"Model saved to {save_model_path}")
+        training_end_date = data.index[-1].strftime("%Y-%m-%d")
+        # Pasa el bucket_name a save_model
+        model.save_model(
+            model_path=save_model_path, 
+            training_end_date=training_end_date, 
+            bucket_name_override=bucket_name
+        )
 
     return model, feature_names, residuals, residuals_dates, acf_values, pacf_values, confint_acf, confint_pacf
