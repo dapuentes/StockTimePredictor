@@ -4,19 +4,20 @@ services:
   api-gateway:
     build:
       context: .
-      dockerfile: Backend/api_gateway/Dockerfile
-    ports:
+      dockerfile: Backend/api_gateway/Dockerfile   
+      ports:
       - "8000:8000" # Puerto del host al puerto del contenedor
     environment:
       # Inyecta las URLs como variables de entorno
       RF_SERVICE_URL: http://model-rf:8001
-      LSTM_SERVICE_URL: http://model-lstm:8002
-      XGB_SERVICE_URL: http://model-xgb:8003
-      # PROPHET_SERVICE_URL: http://model-prophet:8004
+      LSTM_SERVICE_URL: http://model-lstm:8002      
+      XGBOOST_SERVICE_URL: http://model-xgb:8003
+      PROPHET_SERVICE_URL: http://model-prophet:8004
     depends_on:
       - model-rf
       - model-lstm
       - model-xgb
+      - model-prophet
     networks:
       - stockpredictor-net
 
@@ -38,8 +39,8 @@ services:
       dockerfile: Backend/services/model_lstm/Dockerfile
     expose:
       - "8002"
-    volumes:
-      - lstm-models:/app/services/model_lstm/models
+    volumes:      
+    - lstm-models:/app/services/model_lstm/models
     networks:
       - stockpredictor-net
 
@@ -54,24 +55,23 @@ services:
     networks:
       - stockpredictor-net
 
-  # model-prophet: # Descomentar y configurar para Prophet
-  #   build:
-  #     context: .
-  #     dockerfile: services/model_prophet/Dockerfile
-  #   expose:
-  #     - "8004" # Ajustar puerto si es necesario
-  #   volumes:
-  #     - prophet-models:/app/services/model_prophet/models
-  #   networks:
-  #     - stockpredictor-net
+  model-prophet:
+    build:
+      context: .
+      dockerfile: Backend/services/model_prophet/Dockerfile
+    expose:
+      - "8004"
+    volumes:
+      - prophet-models:/app/services/model_prophet/models
+    networks:
+      - stockpredictor-net
 
 
 networks: # Red personalizada
   stockpredictor-net:
     driver: bridge
 
-volumes: # Volúmenes nombrados para persistencia
-  rf-models:
+volumes: # Volúmenes nombrados para persistencia  rf-models:
   lstm-models:
   xgb-models:
-  # prophet-models:
+  prophet-models:

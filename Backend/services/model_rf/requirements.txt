@@ -13,3 +13,4 @@ pandas>=1.5.0
 yfinance>=0.2.12
 
 statsmodels
+google-cloud-storage

@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pandas
+numpy
+prophet
+scikit-learn
+joblib
+pydantic
+apscheduler
+yfinance
+matplotlib
+plotly
