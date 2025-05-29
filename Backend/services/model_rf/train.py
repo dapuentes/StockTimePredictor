@@ -1,6 +1,5 @@
 from .rf_model import TimeSeriesRandomForestModel
 from utils.preprocessing import scale_data_universal
-from utils.preprocessing import PreprocessorFactory
 from statsmodels.tsa.stattools import acf
 from statsmodels.tsa.stattools import pacf
 
@@ -35,11 +34,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
             The trained time series Random Forest model.
     """
 
-    rf_preprocessor = PreprocessorFactory.create_preprocessor(
-        'rf', n_lags=n_lags, use_robust_scaling=False
-    )
-
-    model = TimeSeriesRandomForestModel(preprocessor=rf_preprocessor)
+    model = TimeSeriesRandomForestModel(n_lags=n_lags)
 
     # Preparar los datos
     processed_data = model.prepare_data(data, target_col=target_col)
@@ -56,7 +51,6 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     print(f"Train data shape: {train_data.shape}")
     print(f"Test data shape: {test_data.shape}")
 
-    # Separar características y objetivo
     X_train = train_data.drop(columns=[target_col])
     y_train = train_data[target_col].values.reshape(-1, 1)
     X_test = test_data.drop(columns=[target_col])
@@ -79,7 +73,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
     model.feature_scaler = feature_scaler
     model.target_scaler = target_scaler
 
-    # Modelo optimizado - pasar explícitamente los nombres de características
+    # Modelo optimizado
     model.optimize_hyperparameters(
         X_train_scaled,
         y_train_scaled.ravel(),
@@ -101,7 +95,7 @@ def train_ts_model(data, n_lags=10, target_col='Close', train_size=0.8, save_mod
 
     # Residuales
     residuals = y_train.flatten() - y_train_pred
-    residuals_dates = test_data.index.tolist()
+    residuals_dates = train_data.index.tolist()
 
     # Lags del acf y pacf
     nlags = 40

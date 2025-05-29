@@ -8,6 +8,9 @@ import pandas as pd
 import os
 import json
 
+# Importar el preprocesador
+from utils.preprocessing import RandomForestPreprocessor
+
 
 class TimeSeriesRandomForestModel:
     """
@@ -76,6 +79,9 @@ class TimeSeriesRandomForestModel:
         self.best_pipeline_ = None
         self.feature_names = None
 
+        # Instanciar el preprocesador
+        self.preprocessor = RandomForestPreprocessor(n_lags=self.n_lags)
+
     def prepare_data(self, data, target_col='Close'):
         """
         Prepares the data for modeling by sorting, generating lag features, and applying feature
@@ -96,28 +102,9 @@ class TimeSeriesRandomForestModel:
             pd.DataFrame: A transformed dataframe with lag features and, if applicable,
             additional engineered features.
         """
-
-        from utils.preprocessing import feature_engineering, add_lags
-
-        # Ordenar los datos por fecha si no está ordenado
-        if isinstance(data.index, pd.DatetimeIndex):
-            data = data.sort_index()
-
-        # Crear características de rezagos
-        data_with_lags = add_lags(data, target_col=target_col, n_lags=self.n_lags)
-
-        # Crear características adicionales
-        required_cols = ['Close']
-        if all(col in data.columns for col in required_cols):
-            try:
-                return feature_engineering(data_with_lags)
-            except Exception as e:
-                print(f"Warning: Could not apply full feature engineering: {e}")
-                print("Using only lag features instead.")
-                return data_with_lags
-        else:
-            print(f"Warning: Missing required columns {required_cols}. Using only lag features.")
-            return data_with_lags
+        # Utilizar el preprocesador instanciado en __init__
+        # El método prepare_data del preprocesador se encargará de los lags y feature engineering
+        return self.preprocessor.prepare_data(data, target_col=target_col)
 
     def fit(self, X_train, y_train):
         """
