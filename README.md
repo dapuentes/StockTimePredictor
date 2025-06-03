@@ -1,40 +1,48 @@
 # 📊 StockTimePredictor
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![React](https://img.shields.io/badge/React-18.3+-61DAFB.svg)](https://reactjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Latest-009688.svg)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://docker.com)
+[![Redis](https://img.shields.io/badge/Redis-7-DC382D.svg)](https://redis.io)
+[![Celery](https://img.shields.io/badge/Celery-Task_Queue-37B24D.svg)](https://celeryproject.org)
 
-**StockTimePredictor** es una plataforma completa e interactiva para el pronóstico de precios bursátiles utilizando técnicas avanzadas de análisis de series temporales y modelos de machine learning. La plataforma combina múltiples algoritmos como LSTM, Random Forest, XGBoost y Prophet en una arquitectura de microservicios escalable con una interfaz web moderna y intuitiva.
+**StockTimePredictor** es una plataforma avanzada de pronóstico bursátil que utiliza procesamiento asíncrono, machine learning distribuido y una interfaz moderna para predecir precios de acciones. Con arquitectura de microservicios, colas de tareas distribuidas y procesamiento GPU, ofrece entrenamiento concurrente de múltiples modelos y monitoreo en tiempo real.
 
 ---
 
 ## 🧠 Características Principales
 
 ### 🔮 Predicción Avanzada
-- **Múltiples modelos**: LSTM, Random Forest, XGBoost, Prophet
+- **Múltiples modelos**: LSTM, Random Forest, XGBoost (Prophet en desarrollo)
+- **Procesamiento asíncrono**: Entrenamiento en background con Celery + Redis
+- **Colas distribuidas**: Manejo de múltiples trabajos concurrentes por modelo
 - **Intervalos de confianza**: Estimación de incertidumbre en predicciones
 - **Optimización automática**: Hyperparameter tuning con Keras Tuner y Optuna
-- **Análisis técnico**: Indicadores financieros integrados automaticamente
+- **Soporte GPU**: Aceleración NVIDIA para modelos LSTM
 
 ### 🏗️ Arquitectura Moderna
-- **Microservicios**: Cada modelo como servicio independiente
-- **API Gateway**: Punto de entrada unificado con balanceador de carga
-- **Containerización**: Despliegue con Docker y Docker Compose
-- **Escalabilidad**: Fácil adición de nuevos modelos y servicios
+- **Microservicios distribuidos**: API Gateway + servicios especializados por modelo
+- **Procesamiento asíncrono**: Celery workers para entrenamiento no bloqueante
+- **Redis como broker**: Gestión de colas y almacenamiento de resultados
+- **Containerización completa**: Docker Compose con volúmenes persistentes
+- **Escalabilidad horizontal**: Fácil adición de workers y servicios
 
-### 💻 Interfaz Intuitiva
-- **Dashboard interactivo**: Visualización en tiempo real de predicciones
-- **Configuración flexible**: Parámetros ajustables por modelo
-- **Métricas detalladas**: MAE, RMSE, MAPE y análisis de residuos
-- **Exportación**: Descarga de resultados y gráficos
+### 💻 Interfaz Avanzada
+- **Dashboard reactivo**: Monitoreo en tiempo real con Ant Design
+- **Gestión de trabajos**: Seguimiento de múltiples entrenamientos simultáneos
+- **Panel de modelos**: Visualización, re-entrenamiento y gestión de modelos guardados
+- **Análisis de residuales**: Diagnósticos ACF/PACF para validación de modelos
+- **Exportación avanzada**: Descarga de pronósticos y métricas en CSV
+- **Temas personalizables**: Modo claro/oscuro con ConfigProvider
 
 ### 📊 Análisis Completo
-- **Preprocesamiento inteligente**: Limpieza y transformación automática
-- **Validación cruzada**: Evaluación robusta de modelos
-- **Comparación de modelos**: Benchmarking automático
-- **Visualización avanzada**: Gráficos interactivos con Chart.js
+- **Preprocesamiento inteligente**: Pipeline automático de limpieza y transformación
+- **Validación robusta**: Cross-validation con métricas detalladas (MAE, RMSE, MAPE, R²)
+- **Comparación de modelos**: Benchmarking automático entre algoritmos
+- **Visualización interactiva**: Gráficos con zoom, pan y anotaciones
+- **Metadatos detallados**: Tracking completo de experimentos y resultados
 
 ---
 
@@ -45,109 +53,108 @@ StockTimePredictor/
 ├── 🐳 docker-compose.yml                # Orquestación de servicios
 ├── 📄 README.md                         # Documentación principal
 │
-├── 🎨 Frontend/                         # Interfaz de Usuario (React)
+├── 🎨 Frontend/                         # Interfaz de Usuario (React + Ant Design)
 │   ├── 📱 public/
 │   │   └── index.html                   # Punto de entrada HTML
 │   ├── ⚛️ src/
-│   │   ├── 🧩 components/               # Componentes React reutilizables
-│   │   │   ├── ConfigurationPanel_AntD.js   # Panel de configuración
-│   │   │   ├── GraphDisplay.js              # Visualización de gráficos
-│   │   │   ├── MetricsDisplay_AntD.js       # Métricas y resultados
-│   │   │   ├── ModelComparisonTable.js     # Comparación de modelos
-│   │   │   └── LoadingSpinner.js           # Indicadores de carga
+│   │   ├── 🧩 components/               # Componentes React especializados
+│   │   │   ├── ConfigurationPanel_AntD.js   # Panel de configuración avanzado
+│   │   │   ├── GraphDisplay.js              # Visualización con Chart.js + zoom
+│   │   │   ├── MetricsDisplay_AntD.js       # Métricas y resultados detallados
+│   │   │   ├── ModelComparisonTable.js     # Comparación entre modelos
+│   │   │   ├── ActiveTrainingJobs.js       # Monitor de trabajos concurrentes
+│   │   │   ├── ResidualsDisplay.js         # Análisis ACF/PACF de residuales
+│   │   │   ├── LoadingSpinner.js           # Indicadores de carga
+│   │   │   ├── ErrorMessage.js             # Manejo de errores
+│   │   │   └── HelpModal.js                # Sistema de ayuda
 │   │   ├── 🎣 hooks/                    # Custom hooks de React
-│   │   │   └── useApiMutations.js          # Gestión de estado API
+│   │   │   └── useApiMutations.js          # Gestión de mutaciones API con TanStack Query
 │   │   ├── 🌐 services/                 # Servicios de comunicación
 │   │   │   └── api.js                      # Cliente HTTP con Axios
-│   │   ├── App.js                      # Componente principal
-│   │   └── index.js                    # Punto de entrada React
+│   │   ├── 🛠️ utils/                    # Utilidades del frontend
+│   │   │   └── pythonUtils.js              # Parsing de metadatos Python
+│   │   ├── App.js                      # Componente principal con gestión de estado
+│   │   ├── App.css                     # Estilos globales
+│   │   └── index.js                    # Punto de entrada React + QueryClient
 │   └── 📦 package.json                 # Dependencias y scripts
 │
-├── 🔧 Backend/                          # Servicios Backend (Python)
-│   ├── 🚪 api_gateway/                  # API Gateway (FastAPI)
-│   │   ├── app.py                      # Orquestador principal
-│   │   ├── Dockerfile                  # Imagen Docker
-│   │   └── requirements.txt            # Dependencias Python
+├── 🔧 Backend/                          # Servicios Backend (Python + FastAPI)
+│   ├── 🚪 api_gateway/                  # API Gateway (Orquestador Central)
+│   │   ├── app.py                      # Router principal con CORS
+│   │   ├── Dockerfile                  # Imagen Docker liviana
+│   │   └── requirements.txt            # FastAPI, httpx, uvicorn
 │   │
-│   ├── 🎯 services/                     # Microservicios de Modelos
-│   │   ├── 🧠 model_lstm/               # Servicio LSTM
-│   │   │   ├── lstm_model.py           # Clase modelo LSTM
-│   │   │   ├── train.py                # Entrenamiento con optimización
-│   │   │   ├── forecast.py             # Predicciones con incertidumbre
-│   │   │   ├── main.py                 # API FastAPI del servicio
-│   │   │   ├── requirements.txt        # TensorFlow, Keras, etc.
-│   │   │   └── README.md               # Documentación específica
+│   ├── 🎯 services/                     # Microservicios Especializados
+│   │   ├── 🧠 model_lstm/               # Servicio LSTM con GPU
+│   │   │   ├── lstm_model.py           # Clase modelo LSTM optimizada
+│   │   │   ├── train.py                # Pipeline de entrenamiento con Keras Tuner
+│   │   │   ├── forecast.py             # Predicciones con intervalos de confianza
+│   │   │   ├── main.py                 # API FastAPI + endpoints
+│   │   │   ├── celery_app.py           # Configuración Celery + Redis
+│   │   │   ├── tasks.py                # Workers asíncronos para entrenamiento
+│   │   │   ├── Dockerfile              # TensorFlow + GPU support
+│   │   │   ├── requirements.txt        # TensorFlow, Keras, Celery, Redis
+│   │   │   └── models/                 # Modelos persistidos (.h5, .joblib)
 │   │   │
 │   │   ├── 🌳 model_rf/                 # Servicio Random Forest
-│   │   │   ├── rf_model.py             # Implementación Random Forest
-│   │   │   ├── train.py                # Pipeline de entrenamiento
-│   │   │   ├── forecast.py             # Predicciones ensemble
-│   │   │   ├── main.py                 # API del servicio
-│   │   │   ├── models/                 # Modelos persistidos (.joblib)
-│   │   │   └── README.md               # Documentación
+│   │   │   ├── rf_model.py             # Implementación Scikit-learn optimizada
+│   │   │   ├── train.py                # Pipeline con cross-validation
+│   │   │   ├── forecast.py             # Predicciones ensemble con bootstrap
+│   │   │   ├── main.py                 # API con endpoints de gestión
+│   │   │   ├── celery_app.py           # Workers distribuidos
+│   │   │   ├── tasks.py                # Tareas asíncronas de entrenamiento
+│   │   │   ├── Dockerfile              # Python slim + dependencias ML
+│   │   │   ├── requirements.txt        # Scikit-learn, Joblib, Celery
+│   │   │   └── models/                 # Modelos + metadata (.joblib, .json)
 │   │   │
-│   │   ├── ⚡ model_xgb/                # Servicio XGBoost
-│   │   │   ├── xgb_model.py            # Modelo XGBoost optimizado
+│   │   ├── ⚡ model_xgb/                # Servicio XGBoost (En desarrollo)
+│   │   │   ├── xgb_model.py            # Modelo XGBoost con Optuna
 │   │   │   ├── main_xgb.py             # API del servicio
 │   │   │   ├── forecast.py             # Predicciones con boosting
-│   │   │   └── requirements.txt        # XGBoost, Optuna, etc.
+│   │   │   ├── Dockerfile              # Contenedor especializado
+│   │   │   └── requirements.txt        # XGBoost, Optuna
 │   │   │
-│   │   └── 📈 model_prophet/            # Servicio Prophet (Meta)
+│   │   └── 📈 model_prophet/            # Servicio Prophet (Meta) - En desarrollo
 │   │       ├── prophet_model.py        # Modelo Facebook Prophet
 │   │       ├── prophet_service.py      # Lógica de negocio
-│   │       └── app.py                  # API del servicio
+│   │       ├── app.py                  # API del servicio
+│   │       ├── Dockerfile              # Contenedor con Prophet
+│   │       └── requirements.txt        # Prophet, holidays
 │   │
 │   ├── 🛠️ utils/                        # Utilidades Compartidas
-│   │   ├── preprocessing.py            # Preprocesamiento de datos
-│   │   ├── import_data.py              # Descarga datos yfinance
-│   │   ├── evaluation.py               # Métricas y evaluación
-│   │   ├── visualizations.py           # Gráficos y plots
+│   │   ├── preprocessing.py            # Pipeline de limpieza y features
+│   │   ├── import_data.py              # Descarga optimizada con yfinance
+│   │   ├── evaluation.py               # Métricas avanzadas y cross-validation
+│   │   ├── visualizations.py           # Generación de gráficos
 │   │   └── imports.py                  # Imports centralizados
 │   │
-│   └── 🎓 training/                     # Scripts de Entrenamiento
+│   └── 🎓 training/                     # Scripts de Entrenamiento Batch
 │       └── scripts/
-│           └── train_rf.py             # Entrenamiento Random Forest
+│           └── train_rf.py             # Entrenamiento offline masivo
 ```
 
 ---
 
 ## ⚙️ Stack Tecnológico
 
-### 🐍 Backend (Python 3.9+)
+### Backend
+- **Framework Web**: FastAPI con Uvicorn
+- **Procesamiento Asíncrono**: Celery + Redis
+- **Machine Learning**: TensorFlow/Keras, Scikit-learn, XGBoost, Prophet
+- **Datos**: yfinance, pandas, numpy
+- **Containerización**: Docker + Docker Compose
 
-| Categoría | Tecnologías |
-|-----------|-------------|
-| **Framework Web** | FastAPI, Uvicorn |
-| **Machine Learning** | TensorFlow/Keras, Scikit-learn, XGBoost |
-| **Deep Learning** | LSTM, Neural Networks, Keras Tuner |
-| **Series Temporales** | Prophet (Meta), Statsmodels |
-| **Datos Financieros** | yfinance, pandas, numpy |
-| **Containerización** | Docker, Docker Compose |
-| **Persistencia** | Joblib, Pickle, JSON |
-| **HTTP Client** | httpx, requests |
+### Frontend
+- **Framework**: React 18.3+ con JavaScript ES6+
+- **UI Components**: Ant Design 5.24+
+- **Visualización**: Chart.js + React-ChartJS-2
+- **Estado**: TanStack React Query
+- **HTTP**: Axios
 
-### ⚛️ Frontend (React 18.3+)
-
-| Categoría | Tecnologías |
-|-----------|-------------|
-| **Framework UI** | React, JavaScript ES6+ |
-| **UI Components** | Ant Design (antd) |
-| **Visualización** | Chart.js, React-ChartJS-2 |
-| **Estado/Queries** | TanStack React Query |
-| **HTTP Client** | Axios |
-| **Fechas** | Day.js, React-DatePicker |
-| **Utilidades** | PapaParse, HammerJS |
-| **Testing** | Jest, React Testing Library |
-
-### 🔧 DevOps & Desarrollo
-
-| Herramienta | Propósito |
-|-------------|-----------|
-| **Docker Compose** | Orquestación de servicios |
-| **Git** | Control de versiones |
-| **CORS Middleware** | Comunicación cross-origin |
-| **Environment Variables** | Configuración de servicios |
-| **Volumes** | Persistencia de modelos |
+### Infraestructura
+- **Message Broker**: Redis 7
+- **Containerización**: Docker Compose con volúmenes persistentes
+- **GPU Support**: NVIDIA Docker (opcional)
 
 ---
 
@@ -155,19 +162,15 @@ StockTimePredictor/
 
 ### Modelos Implementados ✅
 
-| Modelo | Tipo | Características | Casos de Uso |
-|--------|------|----------------|--------------|
-| **LSTM** | Deep Learning | • Redes recurrentes<br>• Memoria a largo plazo<br>• Optimización automática<br>• Intervalos de confianza | Series temporales complejas<br>Patrones no lineales<br>Dependencias temporales |
-| **Random Forest** | Ensemble | • Múltiples árboles<br>• Bootstrapping<br>• Reducción varianza<br>• Feature importance | Robustez general<br>Datos tabulares<br>Interpretabilidad |
-| **XGBoost** | Gradient Boosting | • Boosting secuencial<br>• Regularización L1/L2<br>• Optimización Optuna<br>• Alta precisión | Competencias ML<br>Datos estructurados<br>Alto rendimiento |
+- **LSTM**: Redes recurrentes para series temporales complejas con memoria a largo plazo y optimización automática
+- **Random Forest**: Ensemble de árboles para robustez general con bootstrapping y reducción de varianza  
+- **XGBoost**: Gradient boosting secuencial con regularización L1/L2 y alta precisión
 
 ### Modelos en Desarrollo 🔜
 
-| Modelo | Estado | Características Planeadas |
-|--------|--------|---------------------------|
-| **Prophet** | 🔄 En desarrollo | • Estacionalidad automática<br>• Tendencias<br>• Días festivos<br>• Incertidumbre bayesiana |
-| **Neural Network** | 📋 Planeado | • Red densa<br>• Dropout<br>• Batch normalization<br>• Early stopping |
-| **Ensemble Meta-Model** | 💡 Conceptual | • Combinación de modelos<br>• Voting/Stacking<br>• Pesos dinámicos<br>• Meta-aprendizaje |
+- **Prophet**: Modelo de Facebook para estacionalidad automática, tendencias y días festivos
+- **Neural Network**: Red densa con dropout, batch normalization y early stopping
+- **Ensemble Meta-Model**: Combinación de modelos con voting/stacking y pesos dinámicos
 
 ---
 
@@ -175,35 +178,34 @@ StockTimePredictor/
 
 ### Prerrequisitos
 
-| Herramienta | Versión Mínima | Propósito |
-|-------------|----------------|-----------|
-| **Git** | 2.0+ | Clonación del repositorio |
-| **Docker** | 20.0+ | Containerización |
-| **Docker Compose** | 2.0+ | Orquestación de servicios |
-| **Node.js** | 16.0+ | Frontend development |
-| **Python** | 3.9+ | Backend development (opcional) |
+- **Git** 2.0+: Clonación del repositorio
+- **Docker** 20.0+: Containerización  
+- **Docker Compose** 2.0+: Orquestación de servicios
+- **Node.js** 16.0+: Frontend development (opcional para desarrollo)
+- **Python** 3.10+: Backend development (opcional para desarrollo)
+- **NVIDIA Docker**: GPU support (opcional)
 
 ### 🔧 Instalación Completa
 
 #### 1. Clonar el Repositorio
 
-```bash
+```powershell
 git clone https://github.com/dapuentes/StockTimePredictor.git
 cd StockTimePredictor
 ```
 
 #### 2. Configurar Variables de Entorno (Opcional)
 
-```bash
+```powershell
 # Crear archivo .env para configuración personalizada
-echo "RF_SERVICE_URL=http://model-rf:8001" > .env
-echo "LSTM_SERVICE_URL=http://model-lstm:8002" >> .env
-echo "XGB_SERVICE_URL=http://model-xgb:8003" >> .env
+echo "RF_SERVICE_URL=http://model-rf-api:8001" > .env
+echo "LSTM_SERVICE_URL=http://model-lstm-api:8002" >> .env
+echo "CELERY_BROKER_URL=redis://redis_broker:6379/0" >> .env
 ```
 
 #### 3. Iniciar Backend con Docker
 
-```bash
+```powershell
 # Construir todas las imágenes
 docker-compose build
 
@@ -216,13 +218,14 @@ docker-compose ps
 
 **Servicios Disponibles:**
 - 🚪 **API Gateway**: `http://localhost:8000`
+- 🔴 **Redis Broker**: `http://localhost:6379` (interno)
 - 🧠 **LSTM Service**: `http://localhost:8002` (interno)
-- 🌳 **Random Forest**: `http://localhost:8001` (interno)
+- 🌳 **Random Forest API**: `http://localhost:8001` (interno)
 - ⚡ **XGBoost**: `http://localhost:8003` (interno)
 
 #### 4. Configurar y Ejecutar Frontend
 
-```bash
+```powershell
 # Navegar al directorio frontend
 cd Frontend
 
@@ -237,7 +240,7 @@ npm start
 
 #### 5. Verificar Instalación
 
-```bash
+```powershell
 # Verificar API Gateway
 curl http://localhost:8000/
 
@@ -246,20 +249,27 @@ curl http://localhost:8000/health
 
 # Ver logs de servicios
 docker-compose logs api-gateway
-docker-compose logs model-lstm
+docker-compose logs model-lstm-api
 ```
 
-### 🛠️ Desarrollo Local (Opcional)
+### 🛠️ Desarrollo Local (Sin Docker)
 
-Para desarrollo sin Docker:
+Para desarrollo sin Docker (requiere Redis local):
 
-```bash
+```powershell
+# Instalar y configurar Redis local
+# Windows: Descargar Redis desde GitHub releases
+# O usar WSL: sudo apt install redis-server
+
 # Backend - Instalar dependencias por servicio
 cd Backend/api_gateway
 pip install -r requirements.txt
 
 cd ../services/model_lstm
 pip install -r requirements.txt
+
+# Iniciar workers Celery manualmente
+celery -A model_lstm.celery_app worker -l info
 
 # Frontend
 cd ../../../Frontend
@@ -271,104 +281,124 @@ npm start
 
 ## 🧪 Cómo Usar la App
 
-1. **Seleccionar Configuración**
-   - Ticker (ej. AAPL, TSLA)
-   - Rango de fechas
-   - Modelo (RF, LSTM, XGBoost)
-   - Número de lags (días históricos)
+### 🎯 Flujo Básico de Uso
 
-2. **Entrenamiento**
-   - Clic en “Entrenar Modelo”
-   - Verás indicadores de carga y luego métricas detalladas
+1. **Acceder a la Aplicación**
+   - Frontend: `http://localhost:3000`
+   - Asegúrate de que todos los servicios Docker estén ejecutándose
 
-3. **Pronóstico**
-   - Definir horizonte (días a futuro)
-   - Clic en “Generar Pronóstico”
-   - Visualizar resultados en el gráfico
+2. **Configurar Parámetros de Entrenamiento**
+   - **Ticker**: Símbolo de la acción (ej. AAPL, TSLA, MSFT)
+   - **Rango de fechas**: Período histórico para entrenamiento
+   - **Modelo**: Seleccionar entre RF (Random Forest), LSTM, XGBoost
+   - **Parámetros específicos**: 
+     - **LSTM**: sequence_length, lags, optimize_params
+     - **RF**: n_estimators, max_depth, n_lags
+     - **XGBoost**: n_estimators, learning_rate, max_depth
 
-4. **Explorar Resultados**
-   - Gráfico + predicciones
-   - Métricas
-   - Detalles del modelo
+3. **Iniciar Entrenamiento Asíncrono**
+   - Clic en **"Entrenar Modelo"**
+   - El entrenamiento se ejecuta en **background** usando Celery workers
+   - Monitorea el progreso en tiempo real con la barra de progreso
+   - Visualiza trabajos activos en el panel **"Active Training Jobs"**
+
+4. **Seguimiento de Trabajos**
+   - **Panel de trabajos activos**: Muestra todos los entrenamientos en curso
+   - **Estados disponibles**: `PENDING`, `PROGRESS`, `SUCCESS`, `FAILURE`
+   - **Información detallada**: Progreso, tiempo transcurrido, mensajes de estado
+   - **Cancelación**: Posibilidad de cancelar trabajos en progreso
+
+5. **Revisar Resultados del Entrenamiento**
+   - **Métricas de evaluación**: MAE, RMSE, MAPE
+   - **Metadatos del modelo**: Tiempo de entrenamiento, parámetros utilizados
+   - **Gráficos de entrenamiento**: Curvas de pérdida (para LSTM)
+   - **Feature importance**: Importancia de variables (para RF/XGBoost)
+
+6. **Generar Pronósticos**
+   - **Horizonte de predicción**: Número de días a futuro (1-30)
+   - **Intervalos de confianza**: Bandas de incertidumbre
+   - **Visualización interactiva**: Gráfico con zoom, pan y anotaciones
+   - **Exportación**: Descarga de resultados en formato CSV
+
+7. **Análisis Avanzado**
+   - **Comparación de modelos**: Benchmarking automático entre algoritmos
+   - **Análisis de residuales**: Diagnósticos ACF/PACF para validación
+   - **Gestión de modelos**: Re-entrenamiento y versionado de modelos
+
+### 🔄 Características del Sistema Asíncrono
+
+- **Entrenamiento concurrente**: Múltiples modelos pueden entrenarse simultáneamente
+- **Persistencia de trabajos**: Los trabajos continúan aunque cierres el navegador
+- **Notificaciones en tiempo real**: Actualizaciones de progreso sin necesidad de refrescar
+- **Gestión de recursos**: Distribución inteligente de carga entre workers
+- **Recuperación de errores**: Manejo robusto de fallos y reintentos automáticos
 
 ---
 
 ## 🌐 API - Comunicación Frontend <-> Backend
 
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/train/{modelType}` | POST | Envia parámetros del modelo. Usa `FormData`. |
-| `/predict/{modelType}` | GET | Devuelve predicciones en JSON. Parámetros vía query string. |
+### 🔄 Endpoints Principales
 
-Implementado en: `frontend/src/services/api.js`
+- **POST /train/{modelType}**: Iniciar entrenamiento asíncrono (retorna `job_id`)
+- **GET /train-status/{modelType}/{job_id}**: Consultar estado del entrenamiento  
+- **POST /cancel-training/{modelType}/{job_id}**: Cancelar entrenamiento en progreso
+- **GET /predict/{modelType}**: Generar predicciones con modelo entrenado
+- **GET /models/{modelType}**: Listar modelos disponibles
+- **GET /health**: Estado de salud de todos los servicios
 
-### Ejemplos de Uso de API
+### 🎯 Flujo de Entrenamiento Asíncrono
 
-#### Entrenar Modelo LSTM
-```bash
-curl -X POST "http://localhost:8000/train/lstm" \
-  -F "ticket=AAPL" \
-  -F "start_date=2022-01-01" \
-  -F "end_date=2024-01-01" \
-  -F "n_lags=10" \
-  -F "sequence_length=30" \
-  -F "optimize_params=true"
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant API Gateway
+    participant Celery Worker
+    participant Redis
+
+    Frontend->>API Gateway: POST /train/lstm
+    API Gateway->>Celery Worker: Envía tarea a cola
+    API Gateway->>Frontend: Retorna job_id
+    
+    loop Monitoreo
+        Frontend->>API Gateway: GET /train-status/lstm/{job_id}
+        API Gateway->>Redis: Consulta estado
+        Redis->>API Gateway: Estado actual
+        API Gateway->>Frontend: Progreso (5%, 25%, 100%)
+    end
+    
+    Celery Worker->>Redis: Actualiza progreso
+    Celery Worker->>Redis: Guarda resultado final
 ```
 
-#### Realizar Predicción
-```bash
-curl -X GET "http://localhost:8000/predict/lstm?ticker=AAPL&forecast_horizon=10"
-```
+Implementado en: `frontend/src/services/api.js` y `backend/api_gateway/app.py`
 
-#### Respuesta JSON Típica
-```json
-{
-  "status": "success",
-  "model_type": "lstm",
-  "ticker": "AAPL",
-  "predictions": [180.5, 181.2, 179.8, ...],
-  "confidence_intervals": {
-    "lower": [175.1, 176.3, 174.9, ...],
-    "upper": [185.9, 186.1, 184.7, ...]
-  },
-  "metrics": {
-    "mae": 2.34,
-    "rmse": 3.12,
-    "mape": 1.89,
-    "r2": 0.94
-  },
-  "metadata": {
-    "training_time": "2024-01-15T10:30:00Z",
-    "data_points": 504,
-    "features_used": 15
-  }
-}
-```
+### Características del Sistema Asíncrono
+
+- **Entrenamiento concurrente**: Múltiples modelos pueden entrenarse simultáneamente
+- **Monitoreo en tiempo real**: Consulta de progreso con `job_id`
+- **Gestión de trabajos**: Cancelación y listado de trabajos activos
+- **Manejo de errores**: Respuestas detalladas para fallos y validaciones
+
+---
 
 ---
 
 ## 🛠️ Desarrollo y Contribución
 
-### 📋 Roadmap del Proyecto
+### Próximas Funcionalidades
+- **Modelo Prophet**: Integración completa de Meta Prophet
+- **Real-time Data**: Streaming de datos en tiempo real
+- **Advanced Analytics**: Análisis de sentimiento y noticias
+- **Mobile App**: Aplicación móvil React Native
+- **Cloud Deployment**: Deploy en AWS/GCP/Azure
 
-#### Próximas Funcionalidades
-- [ ] **Modelo Prophet**: Integración completa de Meta Prophet
-- [ ] **Real-time Data**: Streaming de datos en tiempo real
-- [ ] **Advanced Analytics**: Análisis de sentimiento y noticias
-- [ ] **Mobile App**: Aplicación móvil React Native
-- [ ] **Cloud Deployment**: Deploy en AWS/GCP/Azure
+### Mejoras Técnicas
+- **Testing Coverage**: Pruebas unitarias y de integración
+- **CI/CD Pipeline**: GitHub Actions para deployment
+- **Performance Monitoring**: Métricas de rendimiento en producción
+- **Database Integration**: PostgreSQL para persistencia
 
-#### Mejoras Técnicas
-- [ ] **Testing Coverage**: Pruebas unitarias y de integración
-- [ ] **CI/CD Pipeline**: GitHub Actions para deployment
-- [ ] **Performance Monitoring**: Métricas de rendimiento en producción
-- [ ] **API Rate Limiting**: Control de uso de endpoints
-- [ ] **Caching Layer**: Redis para optimización
-- [ ] **Database Integration**: PostgreSQL para persistencia
-
-### 🤝 Guía de Contribución
-
-#### Configuración para Desarrollo
+### Configuración para Desarrollo
 
 ```bash
 # 1. Fork del repositorio en GitHub
@@ -382,7 +412,7 @@ git checkout -b feature/nueva-funcionalidad
 # 4. Configurar entorno de desarrollo
 # Backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate
 pip install -r Backend/api_gateway/requirements.txt
 
 # Frontend
@@ -390,64 +420,19 @@ cd Frontend
 npm install
 ```
 
-#### Estándares de Código
-
-```python
-# Python: Seguir PEP 8
-# Usar type hints
-def predict_prices(ticker: str, days: int = 10) -> List[float]:
-    """Predice precios futuros para un ticker dado."""
-    pass
-
-# Documentación obligatoria para funciones públicas
-# Tests unitarios para nuevas funcionalidades
-```
-
-```javascript
-// JavaScript: ESLint + Prettier
-// Componentes funcionales con hooks
-const PredictionChart = ({ data, isLoading }) => {
-  const [selectedModel, setSelectedModel] = useState('lstm');
-  
-  return (
-    <div className="chart-container">
-      {/* JSX aquí */}
-    </div>
-  );
-};
-```
-
-#### Pull Request Guidelines
+### Pull Request Guidelines
 
 1. **Descripción Clara**: Explica qué cambios introduces
 2. **Tests**: Incluye pruebas para nuevas funcionalidades
 3. **Documentación**: Actualiza README y docstrings
 4. **Screenshots**: Para cambios de UI, incluye capturas
-5. **Breaking Changes**: Marca claramente cambios incompatibles
 
----
-
-## 📊 Monitoreo y Métricas
-
-### Métricas de Rendimiento
-
-| Servicio | Métricas Clave | Objetivo |
-|----------|----------------|----------|
-| **API Gateway** | Latencia, Throughput, Error Rate | < 200ms, > 100 req/s, < 1% |
-| **LSTM Model** | Tiempo entrenamiento, Precisión | < 5 min, > 90% R² |
-| **Frontend** | Load Time, Bundle Size | < 3s, < 2MB |
-
-### Logs y Debugging
+## Monitoreo y Logs
 
 ```bash
 # Ver logs en tiempo real
 docker-compose logs -f api-gateway
 docker-compose logs -f model-lstm
-
-# Debugging de servicios individuales
-docker-compose exec api-gateway /bin/bash
-docker-compose exec model-lstm python -c "import tensorflow; print(tensorflow.__version__)"
-```
 
 ---
 

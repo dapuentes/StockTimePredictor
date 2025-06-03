@@ -1,77 +1,146 @@
-version: '3.8'
-
 services:
+  redis_broker:
+    image: redis:7-alpine
+    container_name: stock_redis_broker
+    ports:
+      - "6379:6379"
+    networks:
+      - stockpredictor-net
+    volumes:
+      - redis-data:/data
+
   api-gateway:
     build:
-      context: .
-      dockerfile: Backend/api_gateway/Dockerfile
+      context: ./Backend/api_gateway # Contexto ahora es el directorio del gateway
+      dockerfile: Dockerfile         # Dockerfile se busca DENTRO de ese contexto
+    container_name: stock_api_gateway
     ports:
-      - "8000:8000" # Puerto del host al puerto del contenedor
+      - "8000:8000"
     environment:
-      # Inyecta las URLs como variables de entorno
-      RF_SERVICE_URL: http://model-rf:8001
-      LSTM_SERVICE_URL: http://model-lstm:8002
-      XGB_SERVICE_URL: http://model-xgb:8003
-      # PROPHET_SERVICE_URL: http://model-prophet:8004
+      RF_SERVICE_URL: http://model-rf-api:8001
+      LSTM_SERVICE_URL: http://model-lstm-api:8002
+      #XGBOOST_SERVICE_URL: http://model-xgb-api:8003
     depends_on:
-      - model-rf
-      - model-lstm
-      - model-xgb
+      - model-rf-api
+      - model-lstm-api
+      #- model-xgb-api
+      #- redis_broker
     networks:
       - stockpredictor-net
 
-  model-rf:
+  model-lstm-api:
     build:
-      context: .
-      dockerfile: Backend/services/model_rf/Dockerfile
-    expose: # Red interna de Docker
-      - "8001"
-    volumes:
-      # Volumen nombrado para persistir los modelos de RF
-      - rf-models:/app/services/model_rf/models
-    networks:
-      - stockpredictor-net
-
-  model-lstm:
-    build:
-      context: .
-      dockerfile: Backend/services/model_lstm/Dockerfile
+      context: ./Backend
+      dockerfile: services/model_lstm/Dockerfile
+    container_name: stock_lstm_api
+    command: uvicorn model_lstm.main:app --host 0.0.0.0 --port 8002 --reload --app-dir /app/services_code
     expose:
       - "8002"
     volumes:
-      - lstm-models:/app/services/model_lstm/models
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_lstm:/app/services_code/model_lstm
+      - lstm-models:/app/services_code/model_lstm/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_LSTM=redis://redis_broker:6379/1
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code 
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis_broker
     networks:
       - stockpredictor-net
 
-  model-xgb:
+  model-lstm-worker:
     build:
-      context: .
-      dockerfile: Backend/services/model_xgb/Dockerfile
-    expose:
-      - "8003"
+      context: ./Backend
+      dockerfile: services/model_lstm/Dockerfile
+    container_name: stock_lstm_worker
+    command: celery -A model_lstm.celery_app worker -l info 
+    working_dir: /app/services_code
     volumes:
-      - xgb-models:/app/services/model_xgb/models
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_lstm:/app/services_code/model_lstm
+      - lstm-models:/app/services_code/model_lstm/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_LSTM=redis://redis_broker:6379/1
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis_broker
     networks:
       - stockpredictor-net
 
-  # model-prophet: # Descomentar y configurar para Prophet
-  #   build:
-  #     context: .
-  #     dockerfile: services/model_prophet/Dockerfile
-  #   expose:
-  #     - "8004" # Ajustar puerto si es necesario
-  #   volumes:
-  #     - prophet-models:/app/services/model_prophet/models
-  #   networks:
-  #     - stockpredictor-net
+  # --- Random Forest ---
+  model-rf-api:
+    build:
+      context: ./Backend # Contexto del servicio RF
+      dockerfile: services/model_rf/Dockerfile
+    container_name: stock_rf_api
+    command: uvicorn model_rf.main:app --host 0.0.0.0 --port 8001 --reload --app-dir /app/services_code
+    expose:
+      - "8001"
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_rf:/app/services_code/model_rf
+      - rf-models:/app/services_code/model_rf/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_RF=redis://redis_broker:6379/2
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
 
+  model-rf-worker:
+    build:
+      context: ./Backend
+      dockerfile: services/model_rf/Dockerfile
+    container_name: stock_rf_worker
+    command: celery -A model_rf.celery_app worker --loglevel=info --queues=rf_queue
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_rf:/app/services_code/model_rf
+      - rf-models:/app/services_code/model_rf/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_RF=redis://redis_broker:6379/2
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+      - CELERY_WORKER_CONCURRENCY=6 # Ajustar según capacidad de procesador de la máquina
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
 
-networks: # Red personalizada
+  # --- XGBoost  ---
+  
+networks:
   stockpredictor-net:
     driver: bridge
 
-volumes: # Volúmenes nombrados para persistencia
+volumes:
   rf-models:
   lstm-models:
-  xgb-models:
-  # prophet-models:
+  #xgb-models:
+  redis-data:
