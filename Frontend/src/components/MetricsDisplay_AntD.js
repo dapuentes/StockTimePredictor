@@ -7,7 +7,7 @@ const interpretations = {
     MSE: "Error Cuadrático Medio: Es el promedio de los errores al cuadrado. Penaliza más los errores grandes que los pequeños. Sus unidades son el cuadrado de las unidades originales (ej. dólares²), por lo que es menos intuitivo.",
     RMSE: "Raíz del Error Cuadrático Medio: Es la raíz cuadrada del MSE. Vuelve a las unidades originales (ej. dólares) y representa el error típico, dando más peso a errores grandes. Menor es mejor.",
     MAE: "Error Absoluto Medio: Es el promedio del valor absoluto de los errores. Está en las unidades originales (ej. dólares) y es más fácil de interpretar que el RMSE como el 'error promedio'. Menor es mejor.",
-    MAPE: "Error Porcentual Absoluto Medio: Es el promedio del error absoluto expresado como porcentaje del valor real. Es útil para comparar la precisión entre modelos o activos con diferentes escalas de precio. Menor es mejor (<10-15% suele considerarse bueno para acciones)."
+    MAPE: "Error Porcentual Absoluto Medio: Es el promedio del error absoluto expresado como porcentaje del valor real. Es útil para comparar la precisión entre modelos o activos con diferentes escalas de precio. Menor es mejor (<5% excelente, 5-10% muy bueno, 10-15% aceptable, >15% mejorable)."
 };
 
 // --- Helper para formatear números (opcional, pero útil) ---
@@ -57,8 +57,7 @@ function MetricsDisplay({ metrics }) { // Renombro prop a 'metrics' por claridad
     }
 
     // Crear los items para el componente Descriptions
-    const items = [
-        {
+    const items = [        {
             key: 'MAPE',
             // Usar el helper para el label con tooltip
             label: <MetricLabel title="MAPE" interpretation={interpretations.MAPE} />,

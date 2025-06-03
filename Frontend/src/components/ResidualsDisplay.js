@@ -29,13 +29,6 @@ ChartJS.register(
   annotationPlugin
 );
 
-/**
- * Componente para renderizar un gráfico de autocorrelación (ACF o PACF).
- * @param {object} props - Propiedades del componente.
- * @param {string} props.title - Título del gráfico.
- * @param {object} props.correlationData - Datos de correlación que incluyen valores y bandas de confianza.
- * @returns {JSX.Element}
- */
 const CorrelationChart = ({ title, correlationData }) => {
   // No renderizar si no hay datos
   if (!correlationData || !correlationData.values) {

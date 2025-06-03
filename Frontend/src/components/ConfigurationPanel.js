@@ -19,30 +19,6 @@ const dateToDayjs = (date) => (date ? dayjs(date) : null);
 const dayjsToDate = (dayjsObj) => (dayjsObj ? dayjsObj.toDate() : null);
 
 
-/**
- * React component for configuring and managing a forecasting model panel.
- * Allows users to select tickers, model types, date ranges, number of lags,
- * and forecast horizons. Users can train the model and generate forecasts through interactive inputs.
- *
- * @param {Object} props The props for the ConfigurationPanel component.
- * @param {Array<string>} props.availableModelTypes List of available model types for selection.
- * @param {Array<string>} props.availableTickers List of available tickers for selection.
- * @param {Function} props.onConfigChange Function called when any configuration value is updated,
- *                                        receives the updated configuration object as a parameter.
- * @param {Function} props.onTrain Function called when the "Entrenar Modelo" button is clicked,
- *                                  receives the selected model type and current configuration.
- * @param {Function} props.onForecast Function called when the "Generar Pronóstico" button is clicked,
- *                                     receives the selected model type and current configuration.
- * @param {Object} props.initialConfig Initial configuration object, used to initialize the form's state.
- * @param {string} props.initialConfig.selectedTicker The initial selected ticker.
- * @param {string} props.initialConfig.selectedModelType The initial selected model type.
- * @param {Date} props.initialConfig.startDate Start date for the training range.
- * @param {Date} props.initialConfig.endDate End date for the training range.
- * @param {number} props.initialConfig.nLags Initial number of lags for training.
- * @param {number} props.initialConfig.forecastHorizon Initial forecast horizon in days.
- *
- * @return {JSX.Element} The JSX representation of the configuration panel.
- */
 function ConfigurationPanel({
     availableModelTypes,
     availableTickers,
