@@ -1,5 +1,15 @@
-from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, root_mean_squared_error
-
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+try:
+    from sklearn.metrics import root_mean_squared_error
+except ImportError:
+    import numpy as np
+    # Fallback para compatibilidad con lstm (con google cloud se elimina el try except)
+    def root_mean_squared_error(y_true, y_pred):
+        """
+        Calcula RMSE manualmente para compatibilidad.
+        """
+        return np.sqrt(mean_squared_error(y_true, y_pred))
+    
 def evaluate_regression(y_true, y_pred):
     """
         Compute multiple regression evaluation metrics for the comparison of true and predicted
