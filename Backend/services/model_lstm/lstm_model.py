@@ -527,9 +527,36 @@ class TimeSeriesLSTMModel:
             'preprocessor': self.preprocessor,
             'feature_scaler': self.feature_scaler,
             'target_scaler': self.target_scaler
-        }
+        }        
         joblib.dump(components, os.path.join(dir_path, 'lstm_components.joblib'))
-        print(f"Modelo y componentes guardados en el directorio: {dir_path}")
+        
+        # Guardar metadatos del modelo
+        metadata = {
+            'best_params': self.best_params_ if hasattr(self, 'best_params_') else None,
+            'metrics': self.metrics if hasattr(self, 'metrics') else None,
+            'model_type': 'LSTM',
+            'timestamp': pd.Timestamp.now().isoformat()
+        }
+        
+        # Guardar metadatos en archivo JSON
+        metadata_file = os.path.join(dir_path, 'lstm_metadata.json')
+        import json
+        with open(metadata_file, 'w') as f:
+            # Convertir valores numpy a tipos nativos de Python para JSON serialization
+            metadata_serializable = {}
+            for k, v in metadata.items():
+                if isinstance(v, dict):
+                    metadata_serializable[k] = {sub_k: float(sub_v) if isinstance(sub_v, np.float64) else sub_v 
+                                               for sub_k, sub_v in v.items()}
+                elif isinstance(v, np.ndarray):
+                    metadata_serializable[k] = v.tolist()
+                elif isinstance(v, np.float64):
+                    metadata_serializable[k] = float(v)
+                else:
+                    metadata_serializable[k] = v
+            json.dump(metadata_serializable, f, indent=4)
+        
+        print(f"Modelo, componentes y metadatos guardados en el directorio: {dir_path}")
 
     @classmethod
     def load_model(cls, dir_path):

@@ -1,155 +1,100 @@
-# Carpeta `model_lstm`
+# Servicio de Modelo LSTM
 
-Esta carpeta contiene la implementación y los recursos relacionados con el modelo LSTM (Long Short-Term Memory) utilizado para predicción de series temporales financieras en este proyecto.
-
-## Descripción
-
-El modelo LSTM está diseñado para predecir precios futuros de acciones utilizando redes neuronales recurrentes. Incluye características avanzadas como:
-
-- Optimización automática de hiperparámetros con Keras Tuner
-- Estimación de incertidumbre mediante Monte Carlo Dropout
-- Intervalos de confianza en las predicciones
-- Regularización L2 y Batch Normalization
-- Early stopping para prevenir sobreajuste
+Este servicio contiene la implementación y recursos relacionados con el modelo LSTM (Long Short-Term Memory) para predicción de series temporales financieras. Es un microservicio desarrollado con FastAPI y Celery para procesamiento asíncrono.
 
 ## Estructura de la carpeta
 
-- `lstm_model.py`: Implementación principal de la clase `TimeSeriesLSTMModel` con arquitectura LSTM.
-- `train.py`: Script para entrenar el modelo con datos históricos, incluyendo optimización de hiperparámetros.
-- `forecast.py`: Módulo para realizar predicciones futuras con intervalos de confianza.
-- `main.py`: Microservicio FastAPI que expone endpoints para entrenamiento y predicción.
-- `requirements.txt`: Dependencias necesarias para ejecutar el código.
-- `Dockerfile`: Configuración para containerización del servicio.
+- `main.py`: API principal con FastAPI que expone endpoints para entrenamiento y predicción.
+- `lstm_model.py`: Implementación de la clase `TimeSeriesLSTMModel` para series temporales.
+- `train.py`: Funciones para entrenar el modelo con datos históricos.
+- `forecast.py`: Funciones para realizar predicciones futuras con el modelo entrenado.
+- `celery_app.py`: Configuración de Celery para procesamiento asíncrono de tareas.
+- `tasks.py`: Tareas de Celery para entrenamiento asíncrono de modelos.
+- `models/`: Carpeta donde se guardan los modelos entrenados y sus metadatos.
+- `requirements.txt`: Dependencias necesarias para ejecutar el servicio.
+- `Dockerfile`: Configuración para contenedorización del servicio.
 
-## Endpoints del API
+## Características del modelo
 
-El servicio expone los siguientes endpoints a través de FastAPI:
+- **Modelo**: LSTM con optimización de hiperparámetros usando Keras Tuner
+- **Series temporales**: Soporte nativo para datos temporales con secuencias
+- **Regularización**: Dropout, Batch Normalization y Early Stopping
+- **Estimación de incertidumbre**: Monte Carlo Dropout para intervalos de confianza
+- **Soporte GPU**: Optimizado para entrenamiento con TensorFlow GPU
+- **Métricas de evaluación**: MAE, MSE, RMSE, MAPE
 
-### Entrenamiento
-- `POST /train/`: Entrena un nuevo modelo LSTM
-- `POST /train_new_ticker/`: Entrena un modelo para un nuevo ticker
-- `POST /train_update_ticker/`: Actualiza un modelo existente con nuevos datos
+## API Endpoints
 
-### Predicción
-- `POST /predict/`: Realiza predicciones con un modelo entrenado
-- `POST /predict_stock/`: Predice precios futuros de una acción específica
+- **POST /train**: Iniciar entrenamiento asíncrono del modelo LSTM
+- **GET /training_status/{job_id}**: Consultar el estado de una tarea de entrenamiento
+- **GET /predict**: Realizar predicciones con intervalos de confianza
+- **GET /models**: Lista de modelos disponibles
+- **GET /health**: Estado de salud del servicio
 
-### Utilidades
-- `GET /health/`: Verifica el estado del servicio
-- `GET /models/`: Lista modelos disponibles
+## Instalación y ejecución
 
-## Cómo usar
+### Requisitos previos
+- Python 3.8+
+- TensorFlow 2.13+
+- Redis (para Celery)
+- GPU recomendada para entrenamiento
 
-### Entrenar el modelo
-
-```python
-from train import train_lstm_model
-import pandas as pd
-
-# Cargar datos
-data = pd.read_csv('data/stock_data.csv')
-
-# Entrenar modelo con optimización de hiperparámetros
-model, metrics = train_lstm_model(
-    data=data,
-    target_col='Close',
-    sequence_length=60,
-    n_lags=5,
-    optimize_params=True,
-    epochs=50,
-    save_model_path='models/lstm_model'
-)
-```
-
-### Realizar predicciones
-
-```python
-from forecast import forecast_future_prices_lstm
-from lstm_model import TimeSeriesLSTMModel
-
-# Cargar modelo entrenado
-model = TimeSeriesLSTMModel.load_model('models/lstm_model')
-
-# Realizar predicciones para los próximos 10 días
-forecast, lower_bounds, upper_bounds = forecast_future_prices_lstm(
-    model=model,
-    data=historical_data,
-    forecast_horizon=10,
-    target_col='Close'
-)
-```
-
-### Usar el API REST
-
-```bash
-# Entrenar modelo
-curl -X POST "http://localhost:8000/train/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticker": "AAPL",
-    "sequence_length": 60,
-    "n_lags": 5,
-    "optimize_params": true
-  }'
-
-# Realizar predicción
-curl -X POST "http://localhost:8000/predict_stock/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticker": "AAPL",
-    "forecast_horizon": 10
-  }'
-```
-
-## Parámetros del modelo
-
-### Arquitectura LSTM
-- `lstm_units`: Número de unidades en cada capa LSTM (por defecto: 50)
-- `dropout_rate`: Tasa de dropout para regularización (por defecto: 0.2)
-- `sequence_length`: Longitud de secuencias de entrada (por defecto: 60)
-
-### Entrenamiento
-- `epochs`: Número máximo de épocas (por defecto: 50)
-- `batch_size`: Tamaño del lote (por defecto: 32)
-- `patience`: Paciencia para early stopping (por defecto: 10)
-- `optimize_params`: Si optimizar hiperparámetros automáticamente
-
-### Preprocesamiento
-- `n_lags`: Número de características de retraso (por defecto: 5)
-- `train_size`: Proporción de datos para entrenamiento (por defecto: 0.8)
-- `validation_size`: Proporción de validación (por defecto: 0.1)
-
-## Dependencias necesarias
-
-Las principales dependencias incluyen:
-
-- `tensorflow`: Framework de deep learning
-- `keras`: API de alto nivel para redes neuronales
-- `kerastuner`: Optimización de hiperparámetros
-- `fastapi`: Framework web para el API
-- `pandas`: Manipulación de datos
-- `numpy`: Computación numérica
-- `scikit-learn`: Herramientas de machine learning
-- `uvicorn`: Servidor ASGI
-
-Instalar todas las dependencias:
-
+### Instalar dependencias
 ```bash
 pip install -r requirements.txt
 ```
 
-## Ejecutar el servicio
-
-### Desarrollo local
+### Ejecutar el servicio
 ```bash
-python -m uvicorn main:app --reload --port 8000
+# Iniciar el servidor FastAPI
+uvicorn main:app --host 0.0.0.0 --port 8002
+
+# En otra terminal, iniciar el worker de Celery
+celery -A celery_app.celery_app worker --loglevel=info
 ```
 
-### Con Docker
+### Usando Docker
 ```bash
-docker build -t lstm-service .
-docker run -p 8000:8000 lstm-service
+# Construir la imagen
+docker build -t lstm-model-service .
+
+# Ejecutar el contenedor
+docker run -p 8002:8002 lstm-model-service
 ```
+## Dependencias principales
+
+- **TensorFlow**: Framework de deep learning para modelos LSTM
+- **Keras**: API de alto nivel para construcción de redes neuronales
+- **Keras Tuner**: Optimización automática de hiperparámetros
+- **FastAPI**: Framework web para la API REST
+- **Celery**: Sistema de colas de tareas para procesamiento asíncrono
+- **Redis**: Broker de mensajes para Celery
+- **pandas**: Manipulación y análisis de datos
+- **numpy**: Operaciones numéricas
+- **scikit-learn**: Herramientas de machine learning complementarias
+
+## Configuración de entorno
+
+El servicio requiere las siguientes variables de entorno:
+- `CELERY_BROKER_URL`: URL del broker Redis para Celery
+- `CELERY_RESULT_BACKEND_URL`: URL del backend de resultados Redis
+
+## Arquitectura
+
+El servicio sigue una arquitectura de microservicios con:
+
+1. **API Layer** (`main.py`): Endpoints REST para interacción externa
+2. **Business Logic** (`lstm_model.py`, `train.py`, `forecast.py`): Lógica de negocio del modelo
+3. **Task Queue** (`celery_app.py`, `tasks.py`): Procesamiento asíncrono de tareas pesadas
+4. **Data Layer** (`models/`): Persistencia de modelos entrenados
+
+## Consideraciones de rendimiento
+
+- **GPU**: Se recomienda usar GPU para acelerar el entrenamiento
+- **Memoria**: Los modelos LSTM pueden requerir memoria significativa para secuencias largas
+- **Tiempo de entrenamiento**: El entrenamiento asíncrono permite operaciones no bloqueantes
+- **Optimización**: Se recomienda usar `optimize_params=True` para mejor rendimiento
+- **Datos**: Mínimo recomendado de 500 puntos de datos para entrenamiento efectivo
 
 ## Características técnicas
 
@@ -160,9 +105,31 @@ docker run -p 8000:8000 lstm-service
 - **Escalado**: Normalización automática de características y objetivo
 - **Validación**: Early stopping basado en pérdida de validación
 
-## Notas
+## Solución de problemas
 
-- Se incluyen características de retraso (lags) y características técnicas automáticamente
-- Los intervalos de confianza se calculan usando Monte Carlo Dropout
-- El modelo guarda automáticamente escaladores y metadatos para reproducibilidad
-- Se recomienda usar GPU para entrenamiento con datasets grandes
+### Error de conexión a Redis
+Verificar que Redis esté ejecutándose con el comando `redis-cli ping`
+
+### Error de memoria insuficiente
+- Reducir `sequence_length` en la configuración del modelo
+- Reducir `lstm_units` para disminuir el tamaño del modelo
+- Aumentar `train_size` para reducir el conjunto de entrenamiento
+
+### Problemas con GPU
+Verificar instalación de CUDA y drivers de GPU compatibles con TensorFlow
+
+### Tareas Celery no se procesan
+Verificar workers activos con `celery -A celery_app.celery_app inspect active` o purgar cola con `celery -A celery_app.celery_app purge`
+
+## Contribuir
+
+Para contribuir al desarrollo:
+
+1. Sigue las convenciones de código PEP 8
+2. Agrega tests para nuevas funcionalidades
+3. Actualiza la documentación según corresponda
+4. Asegúrate de que las pruebas pasen antes de hacer commit
+
+## Licencia
+
+Este proyecto es parte del sistema de predicción de series temporales. Consulta el archivo LICENSE en la raíz del proyecto para más detalles.

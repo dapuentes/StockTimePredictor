@@ -31,14 +31,12 @@ def forecast_future_prices_lstm(
     print(f"\n--- Iniciando la llamada al pronóstico para los próximos {forecast_horizon} días ---")
 
 
-    # Este método ya está diseñado para manejar la recursividad y los intervalos.
     forecast, lower_bounds, upper_bounds = model.predict_future(
         historical_data_df=data,
         forecast_horizon=forecast_horizon,
         target_col=target_col
     )
 
-    # Imprimir los resultados en la consola para una fácil verificación
     print(f"\n--- Resultados del Pronóstico (Valores Desescalados) ---")
     for i in range(forecast_horizon):
         print(

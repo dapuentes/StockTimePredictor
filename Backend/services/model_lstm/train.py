@@ -4,9 +4,35 @@ from tensorflow.keras.callbacks import EarlyStopping
 from statsmodels.tsa.stattools import acf
 from statsmodels.tsa.stattools import pacf
 
+# Importar las clases y la fábrica que hemos construido
 from utils.preprocessing import PreprocessorFactory
 from .lstm_model import TimeSeriesLSTMModel
 from utils.preprocessing import split_data_universal, scale_data_universal
+
+import tensorflow as tf
+
+# Verificar GPU al inicio
+print("=== Verificación de GPU ===")
+print(f"Versión de TensorFlow: {tf.__version__}")
+print(f"GPUs disponibles: {tf.config.list_physical_devices('GPU')}")
+print(f"Construido con soporte CUDA: {tf.test.is_built_with_cuda()}")
+
+# Configurar uso de memoria GPU
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Permitir crecimiento gradual de memoria
+        tf.config.experimental.set_memory_growth(gpus[0], True)
+        
+        tf.config.experimental.set_virtual_device_configuration(
+            gpus[0], 
+            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=3072)]  # 3GB límite
+        )
+    except RuntimeError as e:
+        print(f"Error configurando GPU: {e}")
+else:
+    print("No se detectaron GPUs. Usando CPU.")
+print("===========================\n")
 
 
 def train_lstm_model(
@@ -25,43 +51,19 @@ def train_lstm_model(
         batch_size: int = 32,
         optimize_params: bool = True,
         save_model_path: str = None,
-        # Añadir parámetro de paciencia
+        # Paciencia
         patience: int = 10
+        
 ):
-    """
-    Trains and optimizes a Long Short-Term Memory (LSTM) model for time series forecasting.
-    This function performs several steps including data preprocessing, feature scaling, sequence creation,
-    model training, and hyperparameter optimization (if enabled). It also incorporates mechanisms
-    to handle invalid data points, as well as early stopping during the training process.
-
-    Args:
-        data (pd.DataFrame): Input time series data containing the features and target variable.
-        target_col (str, optional): Name of the column representing the target variable. Defaults to 'Close'.
-        sequence_length (int, optional): The length of input sequences for LSTM training. Defaults to 60.
-        n_lags (int, optional): Number of lag features to include in the preprocessing. Defaults to 5.
-        lstm_units (int, optional): Number of units in the LSTM layer. Defaults to 50.
-        dropout_rate (float, optional): Fraction of input units to drop for the LSTM layer. Defaults to 0.2.
-        train_size (float, optional): Proportion of data to use for training and validation. Defaults to 0.8.
-        validation_size (float, optional): Proportion of the training data to allocate for validation. Defaults to 0.1.
-        epochs (int, optional): Number of training iterations. Defaults to 50.
-        batch_size (int, optional): Number of samples per batch during training. Defaults to 32.
-        optimize_params (bool, optional): Whether to perform hyperparameter optimization. Defaults to True.
-        save_model_path (str, optional): Path to save the trained LSTM model. Defaults to None.
-        patience (int, optional): Number of epochs with no improvement before stopping training. Defaults to 10.
-
-    Raises:
-        ValueError: If invalid values (e.g., NaN or Inf) are detected in the processed data.
-        ValueError: If NaN or Inf values are found in the training sequences or targets during preprocessing.
-    """
     print("--- Iniciando el Pipeline de Entrenamiento del Modelo LSTM ---")
 
-    # Crear el preprocesador LSTM específico usando la fábrica
+    # 1. Crear el preprocesador LSTM específico usando la fábrica
     print(f"1. Creando preprocesador con sequence_length={sequence_length} y n_lags={n_lags}")
     lstm_preprocessor = PreprocessorFactory.create_preprocessor(
         'lstm', sequence_length=sequence_length, n_lags=n_lags
     )
 
-    # Inyectar el preprocesador en el modelo al crearlo
+    # 2. Inyectar el preprocesador en el modelo al crearlo
     print(f"2. Instanciando modelo LSTM con units={lstm_units} y dropout={dropout_rate}")
     model = TimeSeriesLSTMModel(
         preprocessor=lstm_preprocessor,
@@ -69,7 +71,7 @@ def train_lstm_model(
         dropout_rate=dropout_rate
     )
 
-    # Preparar las características (features)
+    # 3. Preparar las características (features)
     print("3. Realizando ingeniería de características...")
     processed_data = model.preprocessor.prepare_data(data, target_col=target_col)
 
@@ -87,7 +89,7 @@ def train_lstm_model(
     else:
         print("   -> ¡Inspección completada! El DataFrame 'processed_data' está limpio.")
 
-    # Dividir datos en conjuntos de entrenamiento y prueba
+    # 4. Dividir datos en conjuntos de entrenamiento y prueba
     print(
         f"4. Dividiendo los datos en {train_size * 100}% para entrenamiento/validación y {(1 - train_size) * 100}% para prueba final.")
     train_val_data, test_data = np.split(processed_data, [int(len(processed_data) * train_size)])
@@ -101,14 +103,16 @@ def train_lstm_model(
     print(f"   -> Tamaño del conjunto de validación: {len(validation_data)}")
     print(f"   -> Tamaño del conjunto de prueba: {len(test_data)}")
 
+    previous_day_prices_test = data[target_col].shift(1).loc[test_data.index] 
+
     # Separar características y objetivo para los tres conjuntos
-    TARGET_NAME = 'target'
+    TARGET_NAME = 'target' 
     X_train, y_train = train_data.drop(columns=[TARGET_NAME]), train_data[TARGET_NAME]
     X_val, y_val = validation_data.drop(columns=[TARGET_NAME]), validation_data[TARGET_NAME]
     X_test, y_test = test_data.drop(columns=[TARGET_NAME]), test_data[TARGET_NAME]
     train_index = X_train.index
 
-    #  Escalar los datos
+    # 5. Escalar los datos
     print("5. Escalando características y variable objetivo...")
     feature_scaler, target_scaler = model.preprocessor.get_scalers()
 
@@ -125,7 +129,7 @@ def train_lstm_model(
     model.feature_scaler = feature_scaler
     model.target_scaler = target_scaler
 
-    #  Crear secuencias
+    # 6. Crear secuencias
     print(f"6. Creando secuencias de datos con longitud {sequence_length}...")
     X_train_seq, y_train_seq = model.preprocessor.create_sequences(X_train_scaled, y_train_scaled)
     X_val_seq, y_val_seq = model.preprocessor.create_sequences(X_val_scaled, y_val_scaled)
@@ -145,7 +149,7 @@ def train_lstm_model(
         raise ValueError("Se encontraron valores NaN o Inf en y_train_seq. El preprocesamiento falló.")
     print("   -> ¡Datos de entrenamiento verificados! No contienen NaN ni Inf.")
 
-    # Entrenar el modelo
+    # 7. Entrenar el modelo
     if optimize_params:
         print("\n7. Iniciando optimización de hiperparámetros (esto puede tardar)...")
         model.optimize_hyperparameters(
@@ -173,23 +177,26 @@ def train_lstm_model(
         print("------------------------------------")
 
     print("\nCalculando residuales del conjunto de entrenamiento...")
-    # Hacer predicciones sobre el conjunto de entrenamiento (secuenciado y escalado)
+    # 1. Hacer predicciones sobre el conjunto de entrenamiento (secuenciado y escalado)
     y_train_pred_scaled_seq = model.predict(X_train_seq)
 
-    # Desescalar las predicciones
+    # 2. Desescalar las predicciones
     # y_train_pred_scaled_seq ya tiene la forma (samples, 1) si la última capa Dense es (units=1)
     y_train_pred_unscaled = model.target_scaler.inverse_transform(y_train_pred_scaled_seq).flatten()
 
-    # Los valores reales y_train_actual_for_residuals ya están desescalados y tienen la forma correcta
+    # 3. Los valores reales y_train_actual_for_residuals ya están desescalados y tienen la forma correcta
 
-    # Calcular residuales
+    # 4. Calcular residuales
     residuals_train = y_train_actual_for_residuals - y_train_pred_unscaled
 
     print(f"  -> Residuales del entrenamiento calculados. Forma: {residuals_train.shape}")
 
-    # Evaluar el modelo en el conjunto de prueba
+    # 8. Evaluar el modelo en el conjunto de prueba
     print("\n8. Evaluando el modelo final en el conjunto de prueba...")
-    model.evaluate(X_test_seq, y_test_seq)
+    y_test_actual_for_eval = y_test.values[sequence_length:]
+    previous_prices_for_eval = previous_day_prices_test.values[sequence_length:]
+
+    model.evaluate(X_test_seq, y_test_seq, previous_prices_for_eval, y_test_actual_for_eval, target_col)
     print(f"   -> Métricas finales del modelo: {model.metrics}")
 
     # Lags del acf y pacf
@@ -198,11 +205,14 @@ def train_lstm_model(
     acf_values, confint_acf = acf(residuals_train, nlags=nlags, alpha=0.05)
 
     pacf_values, confint_pacf = pacf(residuals_train, nlags=nlags, alpha=0.05)
-
-    # Guardar el modelo si se proporciona una ruta
+    
+    # 9. Guardar el modelo si se proporciona una ruta
     if save_model_path:
         print(f"\n9. Guardando modelo en: {save_model_path}")
         model.save_model(save_model_path)
 
     print("\n--- Pipeline de Entrenamiento LSTM Completado Exitosamente ---")
+
+    residuals_train = np.array(residuals_train)
     return model, residuals_train, residual_dates_train, acf_values, pacf_values, confint_acf, confint_pacf
+

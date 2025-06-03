@@ -1,25 +1,24 @@
-# Este archivo debe estar en: Backend/services/model_lstm/main.py
-
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple, Dict, Any
 import os
 import glob
 from datetime import datetime, timedelta
 
-# Importar módulos específicos de LSTM (relativos a la ubicación de este main.py)
 from .lstm_model import TimeSeriesLSTMModel
 from .train import train_lstm_model
 from .forecast import forecast_future_prices_lstm
 
-# Importar módulos de utilidades (asumiendo que 'Backend' está en PYTHONPATH)
 from utils.import_data import load_data
+
+from .celery_app import celery_app # Para consultar estado
+from celery.result import AsyncResult
 
 app = FastAPI(
     title="LSTM Time Series Model Service",
-    version="1.0.0",
+    version="1.1.0",
     description="Un servicio para entrenar y realizar pronósticos con modelos LSTM para series de tiempo."
 )
 
@@ -46,12 +45,13 @@ class BaseTrainRequest(BaseModel):
             be saved. Can be None if saving is not required.
     """
     ticket: str = "NU"
-    start_date: str = "2020-12-10"
-    end_date: str = "2024-10-01"
-    n_lags: int = 10  # Relevante para la creación de lags en el preprocesador
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    training_period: Optional[str] = None  # Utilizado para definir rango especifico (ejm: 1 año, 3 años, todo el histórico)
+    n_lags: int = 10  
     target_col: str = "Close"
     train_size: float = 0.8
-    save_model_path: Optional[str] = None  # Para LSTM, esto será un directorio
+    save_model_path: Optional[str] = None  
 
 
 class TrainRequestLSTM(BaseTrainRequest):
@@ -78,11 +78,40 @@ class TrainRequestLSTM(BaseTrainRequest):
     optimize_params: bool = True
 
 
+class TrainingStatusResponse(BaseModel):
+    """
+    Represents the status of a training job.
+    This model is used to communicate the current state of a training job,
+    including its job ID, status, optional message, progress, and result.
+    Attributes:
+        job_id (str): Unique identifier for the training job.
+        status (str): Current status of the job, which can be one of the following:
+            'PENDING', 'STARTED', 'RETRY', 'FAILURE', 'SUCCESS', 'PROGRESS'.
+        message (Optional[str]): Optional message providing additional information about the job.
+        progress (Optional[Any]): Optional field to indicate progress, which can be a percentage or a dict with progress details.
+        result (Optional[Dict]): Optional field to hold the result of the training job, if applicable.
+    """
+
+    job_id: str
+    status: str 
+    message: Optional[str] = None
+    progress: Optional[Any] = None 
+    result: Optional[Dict] = None
+
+
+
 # --- Configuración de Rutas y Caching ---
 
 # Directorio de modelos específico para este servicio LSTM
-# Estará en: Backend/services/model_lstm/models/
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+if os.path.exists('/app/services_code'):
+    # Entorno Docker con montaje actual
+    MODEL_DIR = "/app/services_code/model_lstm/models"
+elif os.path.exists('/app/Backend'):
+    # Entorno Docker con montaje 
+    MODEL_DIR = "/app/Backend/services/model_lstm/models"
+else:
+    # Entorno local
+    MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Caché para los modelos LSTM cargados
@@ -107,11 +136,21 @@ def get_default_lstm_model_dir(ticket: str) -> str:
     return os.path.join(MODEL_DIR, f"lstm_model_{ticket}")
 
 
+def get_generic_lstm_model_dir() -> str:
+    """
+    Generates the default directory path for storing a generic LSTM model
+    that can be used as fallback when no ticker-specific model exists.
+
+    Returns:
+        str: Absolute path of the generic LSTM model directory.
+    """
+    return os.path.join(MODEL_DIR, "lstm_model_generic")
+
+
 def find_lstm_model_dir(ticket: str) -> Optional[str]:
     """
     Determines the directory path for the LSTM model associated with a given ticket.
-    If a specific model directory for the given ticket does not exist, it attempts to find an 
-    available fallback LSTM model directory.
+    Uses a proper fallback strategy: ticker-specific -> generic -> None.
 
     Args:
         ticket (str): The identifier for which the LSTM model directory should be retrieved.
@@ -122,15 +161,15 @@ def find_lstm_model_dir(ticket: str) -> Optional[str]:
     """
     model_dir_path = get_default_lstm_model_dir(ticket)
     if os.path.exists(model_dir_path) and os.path.isdir(model_dir_path):
+        print(f"Usando modelo LSTM específico para {ticket}: {model_dir_path}")
         return model_dir_path
 
-    # Fallback: buscar cualquier directorio que parezca un modelo LSTM
-    # (Esta lógica puede ser más sofisticada si es necesario)
-    available_model_dirs = [d for d in glob.glob(os.path.join(MODEL_DIR, "lstm_model_*")) if os.path.isdir(d)]
-    if available_model_dirs:
-        print(
-            f"Advertencia: No se encontró modelo LSTM específico para {ticket}. Usando el primero disponible: {available_model_dirs[0]}")
-        return available_model_dirs[0]
+    generic_model_dir = get_generic_lstm_model_dir()
+    if os.path.exists(generic_model_dir) and os.path.isdir(generic_model_dir):
+        print(f"Advertencia: No se encontró modelo LSTM específico para {ticket}. Usando modelo genérico: {generic_model_dir}")
+        return generic_model_dir
+
+    print(f"Error: No se encontró modelo LSTM para {ticket} (ni específico ni genérico)")
     return None
 
 
@@ -162,7 +201,51 @@ def load_lstm_model_from_dir(dir_path: str) -> TimeSeriesLSTMModel:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error cargando modelo LSTM desde {dir_path}: {str(e)}")
+    
+# Nueva función para determinar el rango de fechas real a utilizar
+def actual_date_range(start_date: Optional[str], end_date: Optional[str], training_period: Optional[str],
+                      default_start: str = "2020-12-10", default_end: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Determines the actual date range to use for a process, based on provided start and end dates,
+    a training period, and optional default values.
+    """
+    
+    if start_date and end_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Las fechas deben estar en formato YYYY-MM-DD.")
+        
+        if start_dt > end_dt:
+            raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha de finalización.")
+        
+        return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+        
+    elif training_period:
+        end_dt = datetime.now()
+        if training_period == "1_year":
+            start_dt = end_dt - timedelta(days=365)
+        elif training_period == "3_years":
+            start_dt = end_dt - timedelta(days=365 * 3)
+        elif training_period == "5_years":
+            start_dt = end_dt - timedelta(days=365 * 5)
+        elif training_period == "10_years":
+            start_dt = end_dt - timedelta(days=365 * 10)
+        else:
+            # Si no hay período válido, usar fechas por defecto
+            start_dt = datetime.strptime(default_start, "%Y-%m-%d")
+            end_dt = datetime.strptime(default_end, "%Y-%m-%d") if default_end else datetime.now()
+    else:
+        # Usar valores por defecto
+        start_dt = datetime.strptime(default_start, "%Y-%m-%d")
+        end_dt = datetime.strptime(default_end, "%Y-%m-%d") if default_end else datetime.now()
 
+    if start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha de finalización.")
+    
+    return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+  
 
 def load_stock_data_helper(ticket: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
@@ -209,7 +292,7 @@ async def read_root_lstm():
     return {"message": "Servicio de Modelos de Series de Tiempo LSTM"}
 
 
-@app.post("/train", tags=["LSTM Training & Management"])
+@app.post("/train", status_code=202 , tags=["LSTM Training & Management"])
 async def train_model(request: TrainRequestLSTM):
     """
     Handles the LSTM model training process via an API endpoint.
@@ -236,75 +319,60 @@ async def train_model(request: TrainRequestLSTM):
         HTTPException: If there are insufficient historical data rows to train the 
             model or if an unexpected error occurs during training.
     """
+    print(f"LSTM Service: Solicitud de entrenamiento ASÍNCRONO recibida para ticker: {request.ticket}")
+
     try:
-        print(f"Solicitud de entrenamiento LSTM recibida para el ticker: {request.ticket}")
-        data = load_stock_data_helper(request.ticket, request.start_date, request.end_date)
+        from .tasks import train_lstm_model_task  
 
-        # La ruta de guardado para LSTM es un directorio.
-        # Si no se proporciona, se usa una ruta por defecto.
-        save_dir = request.save_model_path or get_default_lstm_model_dir(request.ticket)
+        task = train_lstm_model_task.delay(request.model_dump())
 
-        # Validación simple de la cantidad de datos
-        min_rows_needed = request.sequence_length + 30  # Un margen para lags y splits
-        if len(data) < min_rows_needed:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No hay suficientes datos históricos para entrenar. Se necesitan al menos {min_rows_needed} filas, pero se obtuvieron {len(data)}."
-            )
+        return {"job_id": task.id, "status": "queued", "message": "El entrenamiento ha sido encolado."}
 
-        print(f"Iniciando entrenamiento del modelo LSTM. Se guardará en: {save_dir}")
-        trained_model, residuals, residual_dates, acf_vals, pacf_vals, confint_acf, confint_pacf = train_lstm_model(
-            data=data,
-            target_col=request.target_col,
-            sequence_length=request.sequence_length,
-            n_lags=request.n_lags,  # Usado por el preprocesador LSTM
-            lstm_units=request.lstm_units,
-            dropout_rate=request.dropout_rate,
-            train_size=request.train_size,
-            epochs=request.epochs,
-            optimize_params=request.optimize_params,
-            save_model_path=save_dir  # train_lstm_model espera un directorio aquí
-        )
-
-        # Opcional: añadir el modelo recién entrenado al caché
-        loaded_lstm_models_cache[save_dir] = trained_model
-
-        response = {
-        "status": "success",
-        "message": f"Modelo LSTM entrenado exitosamente para {request.ticket}",
-        "model_type": "LSTM",
-        "metrics": trained_model.metrics if hasattr(trained_model, 'metrics') else "Métricas no disponibles.",
-        "model_path": os.path.basename(save_dir),
-        "residuals": residuals.tolist(),
-        "residual_dates": residual_dates.strftime('%Y-%m-%d').tolist(),
-        "acf" : {
-            "values": acf_vals.tolist(),
-            "confint_lower": confint_acf[:, 0].tolist(),
-            "confint_upper": confint_acf[:, 1].tolist()
-            },
-        "pacf": {
-            "values": pacf_vals.tolist(),
-            "confint_lower": confint_pacf[:, 0].tolist(),
-            "confint_upper": confint_pacf[:, 1].tolist()
-            }
-        }
-
-        # Añadir los mejores parámetros a la respuesta si el atributo existe y no está vacío
-        if hasattr(trained_model, 'best_params_') and trained_model.best_params_:
-            # Serializar los parámetros para evitar problemas 
-            best_params_serializable = {k: v.item() if isinstance(v, np.generic) else v for k, v in
-                                        trained_model.best_params_.items()}
-            response["best_params"] = best_params_serializable
-
-        return response
-
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"Error detallado durante el entrenamiento LSTM: {e}")
+        print(f"Error al encolar la tarea de entrenamiento LSTM: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error entrenando modelo LSTM: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"No se pudo encolar la tarea de entrenamiento LSTM: {str(e)}")
+    
+@app.get("/training_status/{job_id}", response_model=TrainingStatusResponse, tags=["LSTM Training & Management"])
+async def get_training_status(job_id: str):
+    task_result = AsyncResult(job_id, app=celery_app)
+        
+    status = task_result.status
+    result_data = None
+    progress_info = None
+    message = f"Estado actual del trabajo: {status}"
+
+    if status == 'SUCCESS':
+        result_data = task_result.result
+        message = result_data.get("message", "Entrenamiento completado exitosamente.") if result_data else "Entrenamiento completado."
+        
+    elif status == 'FAILURE':
+        error_info = task_result.result
+        message = f"El entrenamiento falló: {str(error_info)}"
+        
+    elif status == 'PROGRESS':
+        print(f"DEBUG: PROGRESS detectado - info type: {type(task_result.info)}")
+        if isinstance(task_result.info, dict):
+            progress_info = task_result.info.get('progress')
+            current_step = task_result.info.get('current_step', '')
+            message = f"Entrenamiento en progreso: {current_step} ({progress_info}%)"
+        else:
+            print(f"DEBUG: PROGRESS pero info no es dict: {task_result.info}")
+            
+    elif status == 'PENDING':
+        print(f"DEBUG: PENDING - Verificando si realmente está pendiente o no se está ejecutando")
+        
+    else:
+        print(f"DEBUG: Estado desconocido: {status}")
+
+    return TrainingStatusResponse(
+        job_id=job_id,
+        status=status,
+        message=message,
+        progress=progress_info,
+        result=result_data
+    )
 
 @app.get("/predict", tags=["LSTM Prediction"])
 async def predict(
@@ -342,13 +410,17 @@ async def predict(
         HTTPException: If there are issues with the input parameters, insufficient historical data, or if the
                        LSTM model directory is not found.
         HTTPException: If an internal server error occurs during the prediction process.
-    """
+    """    
     try:
         print(f"Solicitud de predicción LSTM recibida para el ticker: {ticket}")
         model_dir_path = find_lstm_model_dir(ticket)
         if not model_dir_path:
-            raise HTTPException(status_code=404,
-                                detail=f"No se encontró un directorio de modelo LSTM entrenado para {ticket}.")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No se encontró un modelo LSTM entrenado para el ticker '{ticket}'. "
+                       f"Para resolver este problema, entrene un modelo LSTM específico para '{ticket}' "
+                       f"o entrene un modelo genérico que pueda usarse como respaldo."
+            )
 
         print(f"Cargando modelo LSTM desde: {model_dir_path}")
         model = load_lstm_model_from_dir(model_dir_path)
@@ -370,8 +442,6 @@ async def predict(
         )
 
         # Validación de datos para predicción
-        # Después del preprocesamiento en predict_future, se necesitará al menos sequence_length filas
-        # Esta es una comprobación previa más simple.
         if len(historical_data) < required_sequence_length + model.preprocessor.n_lags:
             raise HTTPException(
                 status_code=400,
@@ -438,16 +508,13 @@ async def list_lstm_models():
 
         for model_dir_path in model_dirs:
             model_name = os.path.basename(model_dir_path)
-            # Podrías añadir lógica para leer metadatos si los guardas (ej. un json en el dir)
-            # Por ahora, solo información básica del directorio
             dir_size_bytes = sum(
                 os.path.getsize(os.path.join(dirpath, filename)) for dirpath, _, filenames in os.walk(model_dir_path)
                 for filename in filenames)
 
             models_info.append({
                 "name": model_name,
-                "path_type": "directory",
-                "full_path": model_dir_path,  # Considera si quieres exponer la ruta completa
+                "path_type": "directory", 
                 "size_mb": round(dir_size_bytes / (1024 * 1024), 2),
             })
 
@@ -462,7 +529,6 @@ async def list_lstm_models():
 
 @app.get("/health", tags=["General"])
 async def health_check_lstm():
-    """Verifica el estado de salud del servicio de modelos LSTM."""
     return {"status": "Ok", "service": "LSTM Time Series Model Service"}
 
 
