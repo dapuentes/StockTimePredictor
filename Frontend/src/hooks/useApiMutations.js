@@ -1,80 +1,55 @@
 import { useMutation } from '@tanstack/react-query';
-import { trainModel, generateForecast } from '../services/api';
-import { message } from 'antd'; 
+import { trainModel, generateForecast, getTrainingStatus } from '../services/api';
+import { message } from 'antd';
 
-// Hook para la mutación de entrenamiento
-/**
- * Custom hook to handle the mutation for training a machine learning model.
- * 
- * This hook uses `useMutation` to manage the API call for training a model and provides
- * lifecycle callbacks for handling loading, success, error, and settled states.
- * 
- * @param {Object} [options={}] - Optional configuration for the mutation.
- * @param {Function} [options.onSuccessCallback] - Callback function to execute on successful mutation.
- * @param {Function} [options.onErrorCallback] - Callback function to execute on mutation error.
- * @param {Function} [options.onSettledCallback] - Callback function to execute when the mutation is settled (either success or error).
- * @param {...Object} [options] - Additional options to pass to the `useMutation` hook.
- * 
- * @returns {Object} - The mutation object returned by `useMutation`, including methods like `mutate` and `mutateAsync`.
- * 
- * @example
- * const { mutate } = useTrainModelMutation({
- *   onSuccessCallback: (data, variables) => {
- *     console.log('Model trained successfully:', data);
- *   },
- *   onErrorCallback: (error) => {
- *     console.error('Error training model:', error);
- *   },
- * });
- * 
- * mutate({ modelType: 'neural-network', config: { epochs: 10 } });
- */
+
 export function useTrainModelMutation(options = {}) {
     return useMutation({
         mutationFn: ({ modelType, config }) => trainModel(modelType, config), // La función que llama a la API
 
         onMutate: () => {
-
-            message.loading({ content: 'Entrenando...', key: 'trainStatus', duration: 0 });
+            // Show initial submission message
+            message.loading({ content: 'Enviando trabajo de entrenamiento...', key: 'trainSubmit', duration: 0 });
         },
-        onSuccess: (data, variables, context) => {
-
-            message.success({ content: `Modelo ${variables.modelType.toUpperCase()} entrenado!`, key: 'trainStatus', duration: 3 });
-            if (options.onSuccessCallback) options.onSuccessCallback(data, variables); // Llama a callback si se proporcionó
+        onSuccess: (jobData, variables, context) => {
+            // jobData now contains { job_id, status, message } instead of training results
+            const { job_id, status, message: jobMessage } = jobData;
+            
+            // Update message to reflect job has been queued
+            message.success({ 
+                content: `Trabajo de entrenamiento para ${variables.modelType.toUpperCase()} encolado con ID: ${job_id}`, 
+                key: 'trainSubmit', 
+                duration: 4 
+            });
+            
+            // Call the success callback with job data - this should initiate polling in App.js
+            if (options.onSuccessCallback) {
+                options.onSuccessCallback(jobData, variables);
+            }
         },
         onError: (error, variables, context) => {
-
-            message.error({ content: `Error entrenando: ${error.message}`, key: 'trainStatus', duration: 5 });
-             if (options.onErrorCallback) options.onErrorCallback(error, variables); // Llama a callback si se proporcionó
+            // Handle submission errors
+            message.error({ 
+                content: `Error enviando trabajo de entrenamiento: ${error.message}`, 
+                key: 'trainSubmit', 
+                duration: 5 
+            });
+            if (options.onErrorCallback) {
+                options.onErrorCallback(error, variables);
+            }
         },
         onSettled: (data, error, variables, context) => {
-
-             message.destroy('trainStatus'); // Asegura cerrar el mensaje loading
-             if (options.onSettledCallback) options.onSettledCallback(data, error, variables);
-         },
+            // Ensure loading message is cleared
+            message.destroy('trainSubmit');
+            if (options.onSettledCallback) {
+                options.onSettledCallback(data, error, variables);
+            }
+        },
         ...options // Permite pasar opciones adicionales al hook
     });
 }
 
-// Hook para la mutación de pronóstico
-/**
- * Custom hook to handle the generation of forecasts using a mutation.
- *
- * @param {Object} [options={}] - Optional configuration for the mutation.
- * @param {Function} [options.onSuccessCallback] - Callback function to execute on successful mutation.
- * @param {Function} [options.onErrorCallback] - Callback function to execute on mutation error.
- * @param {Function} [options.onSettledCallback] - Callback function to execute when the mutation is settled (either success or error).
- * @returns {Object} - The mutation object returned by `useMutation`.
- *
- * @example
- * const { mutate, isLoading } = useGenerateForecastMutation({
- *   onSuccessCallback: (data) => console.log('Forecast generated:', data),
- *   onErrorCallback: (error) => console.error('Error generating forecast:', error),
- *   onSettledCallback: () => console.log('Mutation settled'),
- * });
- *
- * mutate({ modelType: 'linear', config: { param1: 'value1' } });
- */
+
 export function useGenerateForecastMutation(options = {}) {
      return useMutation({
          mutationFn: ({ modelType, config }) => generateForecast(modelType, config),
@@ -83,16 +58,67 @@ export function useGenerateForecastMutation(options = {}) {
          },
          onSuccess: (data, variables, context) => {
              message.success({ content: 'Pronóstico generado!', key: 'forecastStatus', duration: 3 });
-             if (options.onSuccessCallback) options.onSuccessCallback(data);
+             if (options.onSuccessCallback) options.onSuccessCallback(data, variables);
          },
          onError: (error, variables, context) => {
-             message.error({ content: `Error pronosticando: ${error.message}`, key: 'forecastStatus', duration: 5 });
-             if (options.onErrorCallback) options.onErrorCallback(error);
+             // Check if it's a 404 model not found error to provide specific messaging
+             const isModelNotFoundError = error?.response?.status === 404 || 
+                                        (error?.message && error.message.includes('modelo no encontrado')) ||
+                                        (error?.response?.data && typeof error.response.data === 'string' && error.response.data.includes('no encontrado')) ||
+                                        (error?.response?.data?.detail && error.response.data.detail.includes('no encontrado'));
+             
+             if (isModelNotFoundError) {
+                 // For model not found errors, show a more specific message but don't use error styling
+                 message.warning({ 
+                     content: `Modelo no encontrado para ${variables.modelType.toUpperCase()}`, 
+                     key: 'forecastStatus', 
+                     duration: 3 
+                 });
+             } else {
+                 // For other errors, show the standard error message
+                 message.error({ 
+                     content: `Error pronosticando: ${error.message}`, 
+                     key: 'forecastStatus', 
+                     duration: 5 
+                 });
+             }
+             
+             // Always pass the error and variables to the callback for App.js to handle
+             if (options.onErrorCallback) {
+                 options.onErrorCallback(error, variables);
+             }
          },
          onSettled: (data, error, variables, context) => {
              message.destroy('forecastStatus');
-             if (options.onSettledCallback) options.onSettledCallback();
+             if (options.onSettledCallback) options.onSettledCallback(data, error, variables);
          },
          ...options
      });
- }
+}
+
+
+export function useTrainingStatusMutation(options = {}) {
+    return useMutation({
+        mutationFn: ({ modelType, jobId }) => getTrainingStatus(modelType, jobId),
+        
+        onSuccess: (statusData, variables, context) => {
+            // Handle successful status retrieval
+            if (options.onSuccessCallback) {
+                options.onSuccessCallback(statusData, variables);
+            }
+        },
+        onError: (error, variables, context) => {
+            // Handle status check errors
+            console.error('Error checking training status:', error);
+            if (options.onErrorCallback) {
+                options.onErrorCallback(error, variables);
+            }
+        },
+        onSettled: (data, error, variables, context) => {
+            if (options.onSettledCallback) {
+                options.onSettledCallback(data, error, variables);
+            }
+        },
+        ...options
+    });
+}
