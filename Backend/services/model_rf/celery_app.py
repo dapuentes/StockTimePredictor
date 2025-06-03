@@ -1,0 +1,31 @@
+from celery import Celery
+import os
+
+REDIS_URL = os.getenv("CELERY_BROKER_URL")
+RESULT_BACKEND_URL = os.getenv("CELERY_RESULT_BACKEND_URL_RF") 
+
+if not REDIS_URL:
+    raise RuntimeError("CELERY_BROKER_URL no está definida en el entorno.")
+if not RESULT_BACKEND_URL:
+    raise RuntimeError("CELERY_RESULT_BACKEND_URL_RF no está definida en el entorno.")
+
+celery_app = Celery(
+    "rf_worker", 
+    broker=REDIS_URL,
+    backend=RESULT_BACKEND_URL,
+    include=["model_rf.tasks"] 
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="America/Bogota", 
+    enable_utc=True,
+    worker_concurrency=os.getenv("CELERY_WORKER_CONCURRENCY", 1), # Número de workers concurrentes
+    worker_prefetch_multiplier=1, # Para tareas largas como el entrenamiento
+    task_acks_late=True, # Para que la tarea no se quite de la cola hasta que termine o falle
+    task_routes={
+        'train_rf_model_task': {'queue': 'rf_queue'}
+    }
+)

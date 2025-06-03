@@ -2,17 +2,21 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import pandas as pd
 import os
-from typing import Optional
+from typing import Optional, Tuple, Dict, Any
 import glob
 from datetime import datetime, timedelta
 
-# Importar módulos personalizados
-from Backend.services.model_rf.rf_model import TimeSeriesRandomForestModel
-from Backend.services.model_rf.train import train_ts_model
-from Backend.services.model_rf.forecast import forecast_future_prices
-from Backend.utils.import_data import load_data
+from .rf_model import TimeSeriesRandomForestModel
+from .train import train_ts_model
+from .forecast import forecast_future_prices
+from utils.import_data import load_data
 
-app = FastAPI(title="Random Forest Time Series Model Service", version="1.0.0")
+from .celery_app import celery_app # La instancia de Celery específica para RF
+from celery.result import AsyncResult
+
+app = FastAPI(title="Random Forest Time Series Model Service",
+              version="1.1.0",
+              description="Un servicio para entrenar y predecir series temporales utilizando modelos de Random Forest.")
 
 class TrainRequest(BaseModel):
     """
@@ -39,16 +43,32 @@ class TrainRequest(BaseModel):
             saved, default is None.
     """
     ticket: str = "NU"
-    start_date: str = "2020-12-10"
-    end_date: str = "2023-10-01"
-    n_lags: int = 10
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    training_period: Optional[str] = None  # Utilizado para definir rango especifico (ejm: 1 año, 3 años, todo el histórico)
+    n_lags: int = 10  
     target_col: str = "Close"
     train_size: float = 0.8
-    save_model_path: Optional[str] = None
+    save_model_path: Optional[str] = None  
+
+class TrainingStatusResponseRF(BaseModel):
+    job_id: str
+    status: str
+    message: Optional[str] = None
+    progress: Optional[Any] = None
+    result: Optional[Dict] = None
 
 
 # Rutas para el almacenamiento de modelos
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+if os.path.exists('/app/services_code'):
+    # Entorno Docker con montaje actual
+    MODEL_DIR = "/app/services_code/model_rf/models"
+elif os.path.exists('/app/Backend'):
+    # Entorno Docker con montaje corregido
+    MODEL_DIR = "/app/Backend/services/model_rf/models"
+else:
+    # Entorno local
+    MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Diccionario global para almacenar los modelos entrenados
@@ -146,6 +166,50 @@ def load_model(model_path):
         raise HTTPException(status_code=500, detail=f"Error loading model: {str(e)}")
 
 
+# Nueva función para determinar el rango de fechas real a utilizar
+def actual_date_range(start_date: Optional[str], end_date: Optional[str], training_period: Optional[str],
+                      default_start: str = "2020-12-10", default_end: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Determines the actual date range to use for a process, based on provided start and end dates,
+    a training period, and optional default values.
+    """
+    
+    if start_date and end_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Las fechas deben estar en formato YYYY-MM-DD.")
+        
+        if start_dt > end_dt:
+            raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha de finalización.")
+        
+        return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+        
+    elif training_period:
+        end_dt = datetime.now()
+        if training_period == "1_year":
+            start_dt = end_dt - timedelta(days=365)
+        elif training_period == "3_years":
+            start_dt = end_dt - timedelta(days=365 * 3)
+        elif training_period == "5_years":
+            start_dt = end_dt - timedelta(days=365 * 5)
+        elif training_period == "10_years":
+            start_dt = end_dt - timedelta(days=365 * 10)
+        else:
+            # Si no hay período válido, usar fechas por defecto
+            start_dt = datetime.strptime(default_start, "%Y-%m-%d")
+            end_dt = datetime.strptime(default_end, "%Y-%m-%d") if default_end else datetime.now()
+    else:
+        # Usar valores por defecto
+        start_dt = datetime.strptime(default_start, "%Y-%m-%d")
+        end_dt = datetime.strptime(default_end, "%Y-%m-%d") if default_end else datetime.now()
+
+    if start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha de finalización.")
+    
+    return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+
 def load_stock_data(ticket, start_date, end_date):
     """
     Loads stock data for a specific ticket and date range.
@@ -176,6 +240,8 @@ def load_stock_data(ticket, start_date, end_date):
         raise HTTPException(status_code=500, detail=f"Error downloading data: {str(e)}")
 
 
+# --- Endpoints de la API ---
+
 @app.get("/")
 async def read_root():
     """
@@ -192,73 +258,59 @@ async def read_root():
     return {"message": "Random Forest Time Series Model Service"}
 
 
-@app.post("/train")
+@app.post("/train", status_code=202)
 async def train_model(request: TrainRequest):
-    """
-    Handles the training of a time-series forecasting model based on the provided
-    historical stock data and training configurations.
-
-    Args:
-        request (TrainRequest): A request object containing the necessary
-            parameters for training the model, including stock ticket, date range,
-            desired lags, target column, training size, and save path for the model.
-
-    Returns:
-        dict: A response dictionary containing the training status, success message,
-            computed metrics, best hyperparameters, and the path where the trained
-            model was saved.
-
-    Raises:
-        HTTPException: If any error occurs during the data loading, training, or
-            model saving process.
-    """
+    print(f"RF Service: Solicitud de entrenamiento ASÍNCRONO recibida para ticker: {request.ticket}")
     try:
-        # Cargar datos históricos
-        data = load_stock_data(request.ticket, request.start_date, request.end_date)
+        from .tasks import train_rf_model_task
+        task = train_rf_model_task.delay(request.model_dump())
 
-        # Establecer ruta para guardar el modelo
-        save_path = request.save_model_path
-        if save_path is None or save_path == "":
-            # Si no se proporciona una ruta, usar la ruta predeterminada
-            save_path = get_default_model_path(request.ticket)
-
-        # Validar número de dias para el uso de preprocessing
-        min_days = 260  # Porque en horizon se usan 250 días
-        if len(data) < min_days:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Not enough historical data for training. Need at least {min_days} rows, but got {len(data)}."
-            )
-
-        # Entrenar modelo
-        model, features_names, residuals, residual_dates = train_ts_model(
-            data=data,
-            n_lags=request.n_lags,
-            target_col=request.target_col,
-            train_size=request.train_size,
-            save_model_path=save_path
-        )
-
-        # Agregar el modelo a la memoria caché
-        loaded_models[save_path] = model
-
-        # Devolver métricas y mejores parámetros
-        return {
-            "status": "success",
-            "message": f"Model trained successfully for {request.ticket}",
-            "metrics": model.metrics,
-            "features_names": features_names,
-            "best_params": model.best_params_,
-            "residuals": residuals.tolist(),
-            "residual_dates": [d.strftime("%Y-%m-%d") for d in residual_dates],
-            "model_path": os.path.basename(save_path)
-        }
-
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=f"Error in processing data: {str(ve)}")
-
+        return {"job_id": task.id, "status": "queued", "message": "El entrenamiento del modelo RF ha sido encolado."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error training model: {str(e)}")
+        print(f"Error al encolar la tarea de entrenamiento RF: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"No se pudo encolar la tarea de entrenamiento RF: {str(e)}")
+
+@app.get("/training_status/{job_id}", response_model=TrainingStatusResponseRF)
+async def get_rf_training_status(job_id: str):
+    task_result = AsyncResult(job_id, app=celery_app)
+        
+    status = task_result.status
+    result_data = None
+    progress_info = None
+    message = f"Estado actual del trabajo: {status}"
+
+    if status == 'SUCCESS':
+        result_data = task_result.result
+        message = result_data.get("message", "Entrenamiento completado exitosamente.") if result_data else "Entrenamiento completado."
+        
+    elif status == 'FAILURE':
+        error_info = task_result.result
+        message = f"El entrenamiento falló: {str(error_info)}"
+        
+    elif status == 'PROGRESS':
+        print(f"DEBUG: PROGRESS detectado - info type: {type(task_result.info)}")
+        if isinstance(task_result.info, dict):
+            progress_info = task_result.info.get('progress')
+            current_step = task_result.info.get('current_step', '')
+            message = f"Entrenamiento en progreso: {current_step} ({progress_info}%)"
+        else:
+            print(f"DEBUG: PROGRESS pero info no es dict: {task_result.info}")
+            
+    elif status == 'PENDING':
+        print(f"DEBUG: PENDING - Verificando si realmente está pendiente o no se está ejecutando")
+        
+    else:
+        print(f"DEBUG: Estado desconocido: {status}")
+    
+    return TrainingStatusResponseRF(
+        job_id=job_id,
+        status=status,
+        message=message,
+        progress=progress_info,
+        result=result_data
+    )
 
 
 @app.get("/predict")
@@ -295,6 +347,7 @@ async def predict(
             or forecast computation. Specific error details are included in the HTTP error response.
     """
     try:
+        print(f"Solicitud de predicción RF recibida para el ticket: {ticket}")
         # Verificar que el ticket no esté vacío
         model_path = find_model_for_ticket(ticket)
         if model_path is None:
@@ -381,6 +434,7 @@ async def predict(
             )
 
         try:
+            print("Starting forecast computation for RF...")
             forecast, lower_bounds, upper_bounds = forecast_future_prices(
                 model=model,
                 data=data.copy(),
@@ -448,7 +502,7 @@ async def predict(
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
-@app.get("models")
+@app.get("/models")
 async def list_models():
     """
     Lists all models available in the specified model directory. The function searches
@@ -469,16 +523,16 @@ async def list_models():
 
         for model_path in models:
             model_name = os.path.basename(model_path)
-            metadata = model_path.replace(',joblib', "_metadata.json")
+            metadata_path = model_path.replace('.joblib', "_metadata.json")
             metadata = None
 
-            if os.path.exists(metadata):
+            if os.path.exists(metadata_path):
                 try:
                     import json
-                    with open(metadata, 'r') as f:
+                    with open(metadata_path, 'r') as f:
                         metadata = json.load(f)
                 except:
-                    metadata = {"error": "Cloud not load metadata"}
+                    metadata = {"error": "Could not load metadata"}
 
             model_info.append({
                 "name": model_name,
@@ -486,10 +540,11 @@ async def list_models():
                 "metadata": metadata,
                 "size_mb": round(os.path.getsize(model_path) / (1024 * 1024), 2),  # Tamaño en MB
             })
-            return {
-                "total_models": len(model_info),
-                "models": model_info
-            }
+
+        return {
+            "total_models": len(model_info),
+            "models": model_info
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing models: {str(e)}")
@@ -497,20 +552,10 @@ async def list_models():
 
 @app.get("/health")
 async def health_check():
-    """
-    Handles health check endpoint of the application.
-
-    This function serves as a simple health check mechanism to verify that the
-    application is running and reachable. It provides a status message indicating
-    the health status of the application.
-
-    Returns:
-        dict: A dictionary containing the status message with an "Ok" value.
-    """
     return {"status": "Ok"}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # El puerto 8001 coincide con el microservicio de RF en el API Gateway
+    uvicorn.run(app, host="0.0.0.0", port=8001)  

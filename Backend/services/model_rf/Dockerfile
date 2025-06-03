@@ -1,14 +1,15 @@
-FROM python3.11-slim
+FROM python:3.10-slim-bullseye	
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
+COPY utils /app/utils
+COPY services/model_rf/requirements.txt ./requirements.txt
 
-COPY backend/utils/ /app/utils/
-COPY backend/services/model_rf/ /app/services/model_rf/
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir -r /app/services/model_rf/requirements.txt
+COPY . .
 
 EXPOSE 8001
-
-RUN mkdir -p /app/services/model_rf/models # create the models directory if it doesn't exist
-
-CMD ["uvicorn", "services.model_rf.main:app", "--host", "0.0.0.0", "--port", "8001"]

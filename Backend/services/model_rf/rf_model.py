@@ -1,5 +1,5 @@
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from sklearn.feature_selection import SelectFromModel
 from sklearn.pipeline import Pipeline
 import joblib
@@ -139,21 +139,21 @@ class TimeSeriesRandomForestModel:
         """
         return self.best_pipeline_.predict(X)
 
-    def optimize_hyperparameters(self, X_train, y_train, feature_names=None, param_grid=None, cv=3):
+    def optimize_hyperparameters(self, X_train, y_train, feature_names=None, param_distributions=None, n_iter_cv=300, cv=3):
         """
         Optimize hyperparameters using grid search with cross-validation for a pipeline that includes
         feature selection and a Random Forest model. This method performs feature selection using a
         `SelectFromModel` approach, followed by hyperparameter tuning for the entire pipeline.
 
         The method stores the optimized pipeline, selected feature names, and relevant parameters. If
-        no `param_grid` is specified, a default parameter grid is used. The cross-validation scheme is
+        no `param_distributions` is specified, a default parameter grid is used. The cross-validation scheme is
         specifically designed for time-series data using `TimeSeriesSplit`.
 
         Args:
             X_train: Training data features to fit the pipeline.
             y_train: Target values corresponding to X_train.
             feature_names: List of feature names corresponding to columns in X_train.
-            param_grid: Dictionary specifying the parameter grid for hyperparameter optimization.
+            param_distributions: Dictionary specifying the parameter grid for hyperparameter optimization.
                 If None, a default grid is used.
             cv: Number of cross-validation folds for `TimeSeriesSplit`.
 
@@ -172,8 +172,8 @@ class TimeSeriesRandomForestModel:
 
         estimator_for_selection = RandomForestRegressor(n_estimators=50, random_state=42)
 
-        if param_grid is None:
-            param_grid = {
+        if param_distributions is None:
+            param_distributions = {
                 'selector__max_features': [min(10, len(feature_names)), min(15, len(feature_names)),
                                            min(20, len(feature_names))],
                 'rf__n_estimators': [100, 200],
@@ -182,10 +182,10 @@ class TimeSeriesRandomForestModel:
                 'rf__min_samples_leaf': [3, 5, 7],
                 'rf__max_features': ['sqrt', 'log2', 0.5, 0.7]
             }
-            param_grid['selector__max_features'] = [mf for mf in param_grid['selector__max_features'] if
+            param_distributions['selector__max_features'] = [mf for mf in param_distributions['selector__max_features'] if
                                                     mf <= len(feature_names) and mf > 0]
-            if not param_grid['selector__max_features']:  # Si la lista queda vacía
-                param_grid['selector__max_features'] = [len(feature_names)]
+            if not param_distributions['selector__max_features']:  # Si la lista queda vacía
+                param_distributions['selector__max_features'] = [len(feature_names)]
 
         # Crear pipeline con selector, scaler y modelo
         pipeline = Pipeline([
@@ -197,18 +197,19 @@ class TimeSeriesRandomForestModel:
         tscv = TimeSeriesSplit(n_splits=cv)
 
         # Realizar búsqueda en cuadrícula para optimizar hiperparámetros
-        grid_search = GridSearchCV(
+        grid_search = RandomizedSearchCV(
             estimator=pipeline,
-            param_grid=param_grid,
+            param_distributions=param_distributions,
+            n_iter=n_iter_cv,
             cv=tscv,
             scoring='neg_mean_squared_error',
-            n_jobs=-1,
+            n_jobs=1, # Se usa 1 para posteriormente acelerar con Celery
             verbose=1
         )
 
-        print("Iniciando GridSearchCV con SelectFromModel...")
+        print("Iniciando RandomSearchCV con SelectFromModel...")
         grid_search.fit(X_train, y_train)
-        print("GridSearchCV completado.")
+        print("RandomSearchCV completado.")
 
         self.best_pipeline_ = grid_search.best_estimator_
         self.best_params_ = grid_search.best_params_
@@ -338,8 +339,7 @@ class TimeSeriesRandomForestModel:
             if current_input_for_pipeline.shape[1] != n_features_expected_by_scaler:
                 print(
                     f"ALERTA BUCLE: current_input_for_pipeline tiene {current_input_for_pipeline.shape[1]} cols, scaler espera {n_features_expected_by_scaler}.")
-                # Considera detener o manejar este error si ocurre consistentemente.
-
+                
             #  Escalar con self.feature_scaler (MinMaxScaler)
             scaled_features_N = self.feature_scaler.transform(current_input_for_pipeline)
 
