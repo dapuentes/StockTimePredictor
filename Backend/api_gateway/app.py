@@ -1,11 +1,12 @@
 import os
-
-from fastapi import FastAPI, HTTPException, Query, Form, Path
-from fastapi.middleware.cors import CORSMiddleware
 import httpx
-from datetime import datetime
+from typing import Optional, Dict, Any
 
-app = FastAPI(title="API Gateway", version="1.0.0")
+from fastapi import FastAPI, HTTPException, Query, Path, Body
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI(title="API Gateway", version="1.1.0")
 
 # Configuración de CORS para permitir solicitudes desde cualquier origen
 origins = [
@@ -29,67 +30,63 @@ microservices = {
 }
 
 
+# Nueva clase para manejar la solicitud de entrenamiento
+class TrainRequest(BaseModel):
+    ticket: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    training_period: Optional[int] = None
+    n_lags: Optional[int] = 10
+    target_col: Optional[str] = "Close"
+    train_size: Optional[float] = 0.8
+    save_model_path: Optional[str] = None
+
+    # Nuevos campos para el entrenamiento de cada modelo en particular (revisar mas adelante)
+    # LSTM
+    sequence_length: Optional[int] = None
+    epochs: Optional[int] = None
+    lstm_units: Optional[int] = None
+    dropout_rate: Optional[float] = None
+    optimize_params: Optional[bool] = None
+
+    # Random Forest
+    rf_n_estimators: Optional[int] = None # Prefijo 'rf_' para evitar colisiones si XGBoost también tiene n_estimators
+    rf_max_depth: Optional[int] = None
+    rf_min_samples_split: Optional[int] = None
+    rf_min_samples_leaf: Optional[int] = None
+    rf_max_features: Optional[str] = None # Puede ser "sqrt", "log2" o un float/int
+    rf_cv_folds: Optional[int] = None # Si quieres controlar los folds del CV de RF desde el front
+
 @app.get("/")
 async def read_root():
-    """
-    Handles the root endpoint of the API Gateway that serves as the entry point for API
-    requests. Provides a welcome message to confirm the API's availability.
-
-    Returns:
-        dict: A dictionary containing a single key-value pair with a welcome
-        message.
-    """
     return {"message": "Welcome to the API Gateway"}
 
 
-@app.post("/train/{model_type}")
+@app.post("/train/{model_type}", status_code=202) # Devolver 202 por defecto para el inicio de una tarea
 async def train_model(
         model_type: str = Path(..., description="Tipo de modelo a entrenar (e.g., 'rf', 'lstm', 'xgboost')"),
-        ticket: str = Form("NU"),
-        start_date: str = Form("2020-12-10"),
-        end_date: str = Form("2023-10-01"),
-        n_lags: int = Form(10),
-        target_col: str = Form("Close"),
-        train_size: float = Form(0.8),
-        save_model_path: str = Form(None)
+        train_data: TrainRequest = Body(..., description="Datos de entrenamiento para el modelo")
 ):
     """
-    Handles the training of machine learning models by forwarding the request and parameters
-    to the appropriate microservice based on the specified model type. Supported model types
-    include 'rf', 'lstm', and 'xgboost'. The function validates the model type, constructs the
-    necessary payload, and communicates with the targeted microservice to initiate the
-    training process.
-
-    Args:
-        model_type: Type of the model to train (e.g., 'rf', 'lstm', 'xgboost'). This is a path
-            parameter and defines the service endpoint to forward the training request to.
-        ticket: Identifier or code for the dataset or data source to be used in training.
-            It defaults to 'NU' and is passed as part of the request body.
-        start_date: Start date for the training data, specified in 'YYYY-MM-DD' format. Defaults
-            to '2020-12-10'.
-        end_date: End date for the training data, specified in 'YYYY-MM-DD' format. Defaults to
-            today's date.
-        n_lags: Number of lagging or previous observations to consider in training. It is passed
-            as an integer.
-        target_col: The name of the target column in the dataset to perform predictions on. It
-            defaults to 'Close'.
-        train_size: Proportion of the dataset to be used for training. Specified as a float
-            value (e.g., 0.8 for 80%).
-        save_model_path: Path to save the trained model. If not specified, defaults to None,
-            indicating the model will not be saved directly.
-
-    Returns:
-        dict: JSON response from the microservice being invoked for model training. Contains
-        details about the training process, such as success status or any diagnostic
-        information.
-
-    Raises:
-        HTTPException: If the passed model type is not supported, an error is raised with a
-            status code 400.
-        HTTPException: If there is an issue in sending requests (e.g., server errors or
-            connectivity issues) to the targeted microservice, an error is raised with a
-            status code 500.
-    """
+    Trains a machine learning model by forwarding the request to the appropriate microservice.
+        This endpoint acts as a gateway that routes training requests to the corresponding
+        microservice based on the model type. It handles the asynchronous communication
+        with the training service and manages error responses.
+        Args:
+            model_type (str): The type of model to train. Must be one of the supported
+                             types: 'rf' (Random Forest), 'lstm', or 'xgboost'.
+            train_data (TrainRequest): The training data and configuration parameters
+                                      required for model training.
+        Returns:
+            dict: Response from the microservice containing job information, typically
+                  including a job_id for tracking the training process.
+        Raises:
+            HTTPException: 
+                - 400: If model_type is not supported
+                - 502/503: If the target microservice is unreachable or returns an error
+                - 504: If the request times out waiting for microservice response
+                - 500: For unexpected internal errors
+         """
 
     if model_type.lower() not in microservices:
         raise HTTPException(status_code=400, detail="Invalid model type. Supported types: rf, lstm, xgboost")
@@ -97,38 +94,83 @@ async def train_model(
     # URL del microservicio correspondiente de entrenamiento
     service_url = f"{microservices[model_type.lower()]}/train"
 
+    # Parámetros de la solicitud
+    payload_dict = train_data.model_dump(exclude_none=True) # Excluir campos con valor None (para el frontend)
+
+    print(f"API Gateway: Reenviando solicitud de entrenamiento para {model_type.lower()} a {service_url} con payload: {payload_dict}")
+
     # Reenviar la petición con los parámetros necesarios
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post(
-                service_url,
-                json={
-                    "ticket": ticket,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "n_lags": n_lags,
-                    "target_col": target_col,
-                    "train_size": train_size,
-                    "save_model_path": save_model_path
-                },
-                timeout=300.0  # Timeout de 300 segundos
-            )
+            response = await client.post(service_url, json=payload_dict, timeout=30.0) 
 
-            # Debugging: Imprimir el código de estado y el texto crudo de la respuesta
-            print(f"DEBUG Gateway: Status Code recibido de {service_url}: {response.status_code}")
-            print(f"DEBUG Gateway: Texto CRUDO recibido de {service_url}: ---START---\n{response.text}\n---END---")
+            if response.status_code == 202:
+                response_data = response.json()
+                print(f"API Gateway: Trabajo de entrenamiento para {model_type.lower()} encolado. Job ID: {response_data.get('job_id')}")
+                return response_data 
+            else:
+                print(f"API Gateway: Error del microservicio {model_type.lower()} al encolar. Status: {response.status_code}, Body: {response.text}")
+                try:
+                    error_detail = response.json().get("detail", response.text)
+                except Exception:
+                    error_detail = response.text
+                raise HTTPException(status_code=response.status_code, detail=error_detail)
 
-            response.raise_for_status()  # Lanza un error
-
-            json_response = response.json()
-            # Debugging: Imprimir la respuesta JSON
-            print(f"DEBUG Gateway: Respuesta JSON recibida de {service_url}: {json_response}")
-            return json_response
+        except httpx.ReadTimeout:
+            print(f"API Gateway: Timeout esperando la confirmación de encolamiento de {service_url}")
+            raise HTTPException(status_code=504, detail=f"Gateway timeout esperando que el servicio {model_type.lower()} encole la tarea.")
+        except httpx.RequestError as exc:
+            print(f"API Gateway: No se pudo conectar a {service_url}. Error: {exc}")
+            raise HTTPException(status_code=503, detail=f"No se puede conectar al servicio de {model_type.lower()}.")
         except Exception as e:
-            print(f"ERROR FATAL en Gateway procesando respuesta de {service_url}: {type(e).__name__} - {e}")
+            print(f"API Gateway: Error inesperado al procesar /train/{model_type.lower()}: {type(e).__name__} - {e}")
             import traceback
-            traceback.print_exc()  # <--- Imprime el error detallado
-            raise HTTPException(status_code=500, detail=f"Error interno del Gateway...")
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail="Error interno del Gateway al iniciar el entrenamiento.")
+        
+@app.get("/train_status/{model_type}/{job_id}")
+async def train_status(
+        model_type: str = Path(..., description="Tipo de modelo para verificar el estado del entrenamiento (e.g., 'rf', 'lstm', 'xgboost')"),
+        job_id: str = Path(..., description="ID del trabajo de entrenamiento para consultar su estado")
+):
+    
+    if model_type.lower() not in microservices:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {model_type}. Supported types: {list(microservices.keys())}")
+
+    # El endpoint en el microservicio es /training_status/{job_id}
+    service_url = f"{microservices[model_type.lower()]}/training_status/{job_id}"
+
+    print(f"API Gateway: Consultando estado para job_id {job_id} del modelo {model_type.lower()} en {service_url}")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(service_url, timeout=30.0)
+            response.raise_for_status() 
+            status_data = response.json()
+            print(f"API Gateway: Estado recibido para job_id {job_id}: {status_data}")
+            return status_data
+
+        except httpx.ReadTimeout:
+            print(f"API Gateway: Timeout consultando estado de {service_url}")
+            raise HTTPException(status_code=504, detail=f"Gateway timeout consultando estado del job en el servicio {model_type.lower()}.")
+        except httpx.HTTPStatusError as exc:
+            print(f"API Gateway: Error del microservicio {model_type.lower()} al consultar estado. Status: {exc.response.status_code}, Body: {exc.response.text}")
+            error_detail = f"Error desde el servicio {model_type.lower()} consultando estado: {exc.response.status_code}"
+            try:
+                service_error_detail = exc.response.json().get("detail")
+                if service_error_detail:
+                    error_detail = service_error_detail
+            except Exception:
+                pass 
+            raise HTTPException(status_code=exc.response.status_code, detail=error_detail)
+        except httpx.RequestError as exc:
+            print(f"API Gateway: No se pudo conectar a {service_url} para consultar estado. Error: {exc}")
+            raise HTTPException(status_code=503, detail=f"No se puede conectar al servicio de {model_type.lower()} para consultar estado.")
+        except Exception as e:
+            print(f"API Gateway: Error inesperado al procesar /train_status/{model_type.lower()}/{job_id}: {type(e).__name__} - {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail="Error interno del Gateway consultando estado del entrenamiento.")
 
 
 @app.get("/predict/{model_type}")
@@ -136,28 +178,9 @@ async def predict(
         model_type: str = Path(..., description="Type of model to use for prediction (e.g., 'rf', 'lstm', 'xgboost')"),
         ticket: str = Query("NU", description="ticket of the stock to import"),
         forecast_horizon: int = Query(10, description="Forecast horizon in days"),
-        target_col: str = Query("Close", description="Target column for prediction")
+        target_col: str = Query("Close", description="Target column for prediction"),
+        historical_days: Optional[int] = Query(365, description="Number of historical days to return")
 ):
-    """
-    Handles predictions by routing requests to appropriate microservices based on the
-    specified model type. Validates the model type and forwards user input as
-    parameters to designated microservices for computation.
-
-    Args:
-        model_type (str): Type of model to use for prediction (e.g., 'rf', 'lstm', 'xgboost').
-        ticket (str): Stock ticket identifier to import for prediction (default is 'NU').
-        forecast_horizon (int): Forecast duration in days (default is 10).
-        target_col (str): Target column for prediction (default is 'Close').
-
-    Raises:
-        HTTPException: If the specified model type is invalid.
-        HTTPException: If any error occurs while sending the prediction request to the
-            appropriate microservice.
-
-    Returns:
-        dict: JSON response from the respective microservice containing prediction results.
-    """
-
     if model_type.lower() not in microservices:
         raise HTTPException(status_code=400, detail="Invalid model type. Supported types: rf, lstm, xgboost")
 
@@ -168,28 +191,88 @@ async def predict(
     params = {
         "ticket": ticket,
         "forecast_horizon": forecast_horizon,
-        "target_col": target_col
+        "target_col": target_col,
+        "historical_days": historical_days
     }
 
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(service_url, params=params, timeout=420.0)
-            response.raise_for_status()  # Lanza un error
+            response.raise_for_status()
             return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail=f"Gateway timeout esperando predicción del servicio {model_type.lower()}.")
+        except httpx.HTTPStatusError as exc:
+            error_detail = f"Error desde el servicio {model_type.lower()} en predicción: {exc.response.status_code}"
+            try: service_error_detail = exc.response.json().get("detail"); error_detail = service_error_detail or error_detail
+            except Exception: pass
+            raise HTTPException(status_code=exc.response.status_code, detail=error_detail)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error in sending request to microservice: {e}")
+            raise HTTPException(status_code=500, detail=f"Error interno del Gateway al solicitar predicción: {str(e)}")
+
+
+@app.get("/models/{model_type}")
+async def list_models(
+        model_type: str = Path(..., description="Type of model to list (e.g., 'rf', 'lstm', 'xgboost', 'prophet')")
+):
+    """
+    Lists available trained models for a specific model type by forwarding the request
+    to the appropriate microservice.
+
+    Args:
+        model_type: Type of the model to list (e.g., 'rf', 'lstm', 'xgboost', 'prophet'). 
+            This determines which microservice will handle the request.
+
+    Returns:
+        dict: JSON response from the microservice containing information about available models.
+        Typically includes total count of models and a list with model details such as
+        name, path, metadata, and size.
+
+    Raises:
+        HTTPException: If the model type is not supported (status 400) or if there's
+            an issue communicating with the microservice (status 500, 503, or 504).
+    """
+    if model_type.lower() not in microservices:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {model_type}. Supported types: {list(microservices.keys())}")
+
+    # URL del microservicio correspondiente para listar modelos
+    service_url = f"{microservices[model_type.lower()]}/models"
+
+    print(f"API Gateway: Listando modelos para {model_type.lower()} en {service_url}")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(service_url, timeout=30.0)
+            response.raise_for_status()
+            models_data = response.json()
+            print(f"API Gateway: Modelos recibidos para {model_type.lower()}: {models_data}")
+            return models_data
+
+        except httpx.ReadTimeout:
+            print(f"API Gateway: Timeout listando modelos de {service_url}")
+            raise HTTPException(status_code=504, detail=f"Gateway timeout listando modelos del servicio {model_type.lower()}.")
+        except httpx.HTTPStatusError as exc:
+            print(f"API Gateway: Error del microservicio {model_type.lower()} al listar modelos. Status: {exc.response.status_code}, Body: {exc.response.text}")
+            error_detail = f"Error desde el servicio {model_type.lower()} listando modelos: {exc.response.status_code}"
+            try:
+                service_error_detail = exc.response.json().get("detail")
+                if service_error_detail:
+                    error_detail = service_error_detail
+            except Exception:
+                pass
+            raise HTTPException(status_code=exc.response.status_code, detail=error_detail)
+        except httpx.RequestError as exc:
+            print(f"API Gateway: No se pudo conectar a {service_url} para listar modelos. Error: {exc}")
+            raise HTTPException(status_code=503, detail=f"No se puede conectar al servicio de {model_type.lower()} para listar modelos.")
+        except Exception as e:
+            print(f"API Gateway: Error inesperado al procesar /models/{model_type.lower()}: {type(e).__name__} - {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail="Error interno del Gateway listando modelos.")
 
 
 @app.get("/health")
 async def health_check():
-    """
-    Handles the health check endpoint to ensure the application is running correctly.
-
-    Returns a dictionary indicating the status of the application.
-
-    Returns:
-        dict: A dictionary containing the application's health status.
-    """
     return {"status": "Ok"}
 
 
