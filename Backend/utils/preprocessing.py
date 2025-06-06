@@ -159,33 +159,25 @@ class RandomForestPreprocessor(BasePreprocessor):
                 if len(df_result) > horizon:
                     rolling_averages = df_result['Close'].rolling(window=horizon, min_periods=1).mean()
                     df_result[f'Close_ratio_{horizon}d_MA'] = df_result['Close'] / (rolling_averages + 1e-10)
-                    
-                    trend_raw = df_result['GreenDay'].shift(1).rolling(
+                    df_result[f'Trend_{horizon}d_MA'] = df_result['GreenDay'].shift(1).rolling(
                         window=horizon, min_periods=1
                     ).sum()
-                    df_result[f'Trend_{horizon}d_MA'] = trend_raw.fillna(0)
-                    
-                    momentum_raw = df_result['Close'] / df_result['Close'].shift(horizon) - 1
-                    df_result[f'momentum_{horizon}d'] = momentum_raw.fillna(0)
+                    df_result[f'momentum_{horizon}d'] = df_result['Close'] / df_result['Close'].shift(horizon) - 1
             
             # Bollinger Bands and advanced indicators
             if 'SMA_20' in df_result.columns:
                 bb_std = df_result['Close'].rolling(window=20, min_periods=1).std()
                 df_result['BB_upper'] = df_result['SMA_20'] + (bb_std * 2)
                 df_result['BB_lower'] = df_result['SMA_20'] - (bb_std * 2)
-
-                bb_range = df_result['BB_upper'] - df_result['BB_lower']
-                df_result['BB_position'] = (df_result['Close'] - df_result['BB_lower']) / (bb_range + 1e-10)
-
-                # Clip BB_position to avoid extreme values
-                df_result['BB_position'] = df_result['BB_position'].clip(-3, 3).fillna(0)
+                df_result['BB_position'] = (df_result['Close'] - df_result['BB_lower']) / (df_result['BB_upper'] - df_result['BB_lower'] + 1e-10)
             
             # MACD
             if 'EMA_12' in df_result.columns and 'EMA_26' in df_result.columns:
                 df_result['MACD'] = df_result['EMA_12'] - df_result['EMA_26']
                 df_result['MACD_signal'] = df_result['MACD'].ewm(span=9, adjust=False).mean()
                 df_result['MACD_histogram'] = df_result['MACD'] - df_result['MACD_signal']
-              # Volume features (if available)
+            
+            # Volume features (if available)
             if 'Volume' in df_result.columns:
                 df_result['volume_change'] = df_result['Volume'].pct_change().fillna(0)
                 for window in [5, 10, 20]:
@@ -209,46 +201,6 @@ class RandomForestPreprocessor(BasePreprocessor):
         
         # Add RF-specific features
         data_processed = self.add_rf_specific_features(data_processed)
-        
-        print("RF: Limpiando valores infinitos y NaNs...")
-        
-        # 1. Replace infinites with NaN
-        data_processed.replace([np.inf, -np.inf], np.nan, inplace=True)
-        
-        # 2. Check for NaN columns
-        nan_cols = data_processed.columns[data_processed.isna().any()].tolist()
-        if nan_cols:
-            print(f"RF: Columnas con NaN detectadas: {nan_cols}")
-            
-            # 3. Column-wise intelligent cleaning
-            for col in nan_cols:
-                original_nan_count = data_processed[col].isna().sum()
-                
-                # Linear interpolation first (preserves trends)
-                data_processed[col] = data_processed[col].interpolate(method='linear')
-                
-                # Forward fill 
-                data_processed[col] = data_processed[col].fillna(method='ffill')
-                
-                # Backward fill   
-                data_processed[col] = data_processed[col].fillna(method='bfill')
-                
-                # If still NaN, use median as last resort
-                if data_processed[col].isna().any():
-                    median_val = data_processed[col].median()
-                    fill_value = median_val if not np.isnan(median_val) else 0
-                    data_processed[col] = data_processed[col].fillna(fill_value)
-                
-                final_nan_count = data_processed[col].isna().sum()
-                print(f"RF: Columna '{col}': {original_nan_count} NaN → {final_nan_count} NaN")
-        
-        # 4. Check final NaN count and drop if necessary
-        remaining_nan = data_processed.isna().sum().sum()
-        if remaining_nan > 0:
-            print(f"RF: Eliminando {remaining_nan} filas con NaN restantes como último recurso...")
-            data_processed.dropna(inplace=True)
-        else:
-            print("RF: ✅ Limpieza completada exitosamente. No quedan valores inválidos.")
         
         print(f"RF preprocessing completed. Shape: {data_processed.shape}")
         return data_processed
@@ -290,20 +242,21 @@ class LSTMPreprocessor(BasePreprocessor):
                 if len(df_result) >= window:
                     df_result[f'volatility_{window}'] = df_result['returns'].rolling(window=window, min_periods=1).std()
 
-            # 1. Bollinger Bands (BB)
+            # 1. Ancho de las Bandas de Bollinger (Bollinger Band Width)
             if len(df_result) >= 20:
                 sma_20 = df_result['Close'].rolling(window=20, min_periods=1).mean()
                 std_20 = df_result['Close'].rolling(window=20, min_periods=1).std()
                 bb_upper = sma_20 + (std_20 * 2)
                 bb_lower = sma_20 - (std_20 * 2)
+                # El ancho como porcentaje del precio medio normaliza la métrica
                 df_result['bb_width'] = (bb_upper - bb_lower) / (sma_20 + 1e-10)
             
-            # 2. Average True Range 
+            # 2. Rango Verdadero Promedio (Average True Range - ATR)
             if 'High' in df_result.columns and 'Low' in df_result.columns:
                 high_low = df_result['High'] - df_result['Low']
                 high_close = np.abs(df_result['High'] - df_result['Close'].shift())
                 low_close = np.abs(df_result['Low'] - df_result['Close'].shift())
-                # True Range its the maximum of these three values
+                # True Range es el máximo de estas tres métricas
                 true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
                 # ATR es la media móvil exponencial del True Range
                 df_result['atr_14'] = true_range.ewm(alpha=1/14, adjust=False).mean()
@@ -323,68 +276,39 @@ class LSTMPreprocessor(BasePreprocessor):
     
     def prepare_data(self, data, target_col='Close'):
         """Complete preprocessing for LSTM."""
+        # ¡NUEVO! Guardar el nombre de la columna de precio
         self.price_col = target_col
 
+        # Crear una copia para evitar modificar el DataFrame original
         data_processed = data.copy()
 
         # Base features (minimal)
         data_processed = self.prepare_base_features(data_processed, self.price_col)
 
+        # ¡MODIFICADO! Crear características específicas de LSTM ANTES de los lags
+        # Esto incluye 'log_returns' que será nuestro objetivo
         data_processed = self.add_lstm_specific_features(data_processed)
 
+        # ¡NUEVO! Definir la columna objetivo y renombrarla a 'target'
+        # Esto hace que el resto del pipeline sea más genérico
         data_processed['target'] = data_processed['log_returns']
         
-        # Add lags
+        # Agregar lags usando la columna de precios, no el objetivo de retornos
         data_processed = self.add_lags(data_processed, self.price_col, self.n_lags)
 
         # --- GESTIÓN DE COLUMNAS ---
-        # 1. Save feature names excluding target and price columns
+        # 1. Guardar los nombres de todas las características ANTES de eliminar las columnas no deseadas
+        #    Se excluye el objetivo 'target' y la columna de precio original.
         features_to_drop = ['target', self.price_col, 'log_returns', 'returns']
         self.feature_names = [col for col in data_processed.columns if col not in features_to_drop]
 
-        # 2. Select only relevant columns
+        # 2. Seleccionar solo las características y el objetivo final
         final_cols = self.feature_names + ['target']
         data_processed = data_processed[final_cols]
-          # 3. Inteligent cleaning of NaNs and infinities
-        print("LSTM: Limpiando valores infinitos y NaNs...")
         
-        # Replace infinites with NaN
+        # 3. Limpiar valores infinitos y NaNs que puedan haber quedado
         data_processed.replace([np.inf, -np.inf], np.nan, inplace=True)
-        
-        # Check for NaN columns
-        nan_cols = data_processed.columns[data_processed.isna().any()].tolist()
-        if nan_cols:
-            print(f"LSTM: Columnas con NaN detectadas: {nan_cols}")
-            
-            # Intelligent column-wise cleaning
-            for col in nan_cols:
-                original_nan_count = data_processed[col].isna().sum()
-                
-                # Linear interpolation first (preserves trends)
-                data_processed[col] = data_processed[col].interpolate(method='linear')
-                
-                # Forward fill 
-                data_processed[col] = data_processed[col].fillna(method='ffill')
-                
-                # Backward fill   
-                data_processed[col] = data_processed[col].fillna(method='bfill')
-                
-                # If still NaN, use median as last resort
-                if data_processed[col].isna().any():
-                    median_val = data_processed[col].median()
-                    fill_value = median_val if not np.isnan(median_val) else 0
-                    data_processed[col] = data_processed[col].fillna(fill_value)
-                
-                final_nan_count = data_processed[col].isna().sum()
-                print(f"LSTM: Columna '{col}': {original_nan_count} NaN → {final_nan_count} NaN")
-        
-        # Final NaN check
-        remaining_nan = data_processed.isna().sum().sum()
-        if remaining_nan > 0:
-            print(f"LSTM: Eliminando {remaining_nan} filas con NaN restantes como último recurso...")
-            data_processed.dropna(inplace=True)
-        else:
-            print("LSTM: ✅ Limpieza completada exitosamente. No quedan valores inválidos.")
+        data_processed.dropna(inplace=True)
 
         print(
             f"LSTM preprocessing completed. Shape: {data_processed.shape}. Feature names count: {len(self.feature_names)}")
@@ -439,7 +363,7 @@ class XGBoostPreprocessor(BasePreprocessor):
                     df_result[f'close_to_max_{horizon}'] = df_result['Close'] / (rolling_max + 1e-10)
                     df_result[f'close_to_min_{horizon}'] = df_result['Close'] / (rolling_min + 1e-10)
                     df_result[f'range_ratio_{horizon}'] = (rolling_max - rolling_min) / (rolling_mean + 1e-10)
-                    df_result[f'volatility_norm_{horizon}'] = rolling_std / (rolling_mean + 1e-10)
+                    #df_result[f'volatility_norm_{horizon}'] = rolling_std / (rolling_mean + 1e-10)
             
             # Advanced technical indicators
             # Stochastic oscillator
@@ -479,6 +403,9 @@ class XGBoostPreprocessor(BasePreprocessor):
         data_processed = self.add_xgb_specific_features(data_processed)
         
         print(f"XGBoost preprocessing completed. Shape: {data_processed.shape}")
+        # ACTUALIZACION
+        feature_columns = [col for col in data_processed.columns if col != target_col] # O el nombre de tu columna objetivo finalizada
+        self.feature_names = feature_columns    
         return data_processed
     
     def get_scalers(self):
