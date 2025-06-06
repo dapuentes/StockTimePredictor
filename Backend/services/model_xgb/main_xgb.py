@@ -1,489 +1,325 @@
-'''
+# Backend/services/model_xgb/main.py
 
-This app.py file powers the RESTful API for interacting with the XGBoostModel. It supports endpoints for:
-
-Training a model (/train)
-
-Evaluating performance (/evaluate)
-
-Making future predictions (/predict)
-
-Listing available models (/models)
-
-The app uses FastAPI and integrates with utils/ and services/ modules.
-
-
-API Endpoints
-
-GET /
-
-Basic welcome message.
-
-GET /train
-
-Train a new XGBoost model on locally loaded stock data (default params). Saves model + metrics.
-
-Uses:
-
-load_data()
-
-feature_engineering()
-
-split_data()
-
-scale_data()
-
-XGBoostModel().fit()
-
-Output: {
-  "message": "Model trained and saved successfully.",
-  "evaluation_results": {"mse": ..., "mae": ...}
-}
-GET /predict
-
-Predict future values using latest available model.
-
-Query parameters:
-
-ticket: stock ticker
-
-forecast_horizon: number of days to forecast
-
-target_col: column name (usually 'Close')
-
-Returns JSON array of future values + model metadata used.
-
-GET /models
-
-List trained models in /models dir with metadata, sizes, paths.
-
-GET /evaluate
-
-Evaluates latest model on holdout test data with:
-
-Scaled metrics
-
-Inverse-transformed original-scale metrics
-
-Returns a snapshot:
-{
-  "evaluation_results_scaled": {...},
-  "evaluation_results_original": {...},
-  "sample_predictions": {
-    "predicted": [...],
-    "actual": [...]
-  }
-}
-
-'''
-from pathlib import Path
-import sys
-import os
-from datetime import datetime, timedelta
-import glob
-
-current_dir = Path(__file__).parent
-project_dir = current_dir.parent.parent  # Navigate up to the project root
-sys.path.append(str(project_dir))
-from Backend.services.model_xgb.forecast import forecast_future_prices
-from fastapi import FastAPI, HTTPException, Query
-import pandas as pd
+from fastapi import FastAPI, HTTPException, Query, Depends # Asegúrate de tener Depends si usas GET con Pydantic model
 from pydantic import BaseModel
-
+import pandas as pd
 import numpy as np
-from apscheduler.schedulers.background import BackgroundScheduler
-from Backend.services.model_xgb.xgb_model import XGBoostModel  # Import from the same directory
-from Backend.utils.import_data import load_data
-from Backend.utils import feature_engineering, split_data, scale_data
-import traceback
-#
+from typing import Optional, List, Dict, Any
+import os
+import glob
+import json
+from datetime import datetime, timedelta
+
+# Import modules specific to XGBoost service (relative imports)
+from .xgb_model import TimeSeriesXGBoostModel # Usa la versión de xgb_model_py_v2
+from .train_xgb import train_xgb_model
+from .forecast import forecast_future_prices_xgb
+
+try:
+    from utils.import_data import load_data
+except ImportError:
+    import sys
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(current_dir, '..', '..')) 
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from utils.import_data import load_data
+
+
 app = FastAPI(
-    title="XGBoost Model API",
-    description="API for XGBoost Regression model",
-    version="1.0.0",
+    title="XGBoost Time Series Model Service",
+    version="1.0.2", # Incremented version
+    description="A service for training and making predictions with XGBoost models for time series."
 )
 
-# Define the model path
-MODEL_DIR = "services/model_xgb/models"
-os.makedirs(MODEL_DIR, exist_ok=True)
-
-model_path = os.path.join(MODEL_DIR, "model_xgb.joblib")
-json_path = os.path.join(MODEL_DIR, "model_metrics.json")
-
-
-
-class TrainRequest(BaseModel):
-    ticket: str = "NU"
-    start_date: str = "2020-12-10"
-    end_date: str = datetime.now().strftime("%Y-%m-%d")
+class TrainRequestXGB(BaseModel):
+    ticket: str = "NU" 
+    start_date: Optional[str] = None 
+    end_date: Optional[str] = None
     n_lags: int = 10
-    target_col: str = "Close"
-    train_size: float = 0.8
-    save_model_path: str = None
+    target_col: str = "Close" 
+    train_size_ratio: float = 0.7
+    save_model_path_prefix: Optional[str] = None
 
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+loaded_xgb_models_cache: Dict[str, TimeSeriesXGBoostModel] = {}
 
+def get_default_xgb_model_path_prefix(ticket: str) -> str:
+    return os.path.join(MODEL_DIR, f"xgb_model_{ticket.upper()}")
 
-# Diccionario global para almacenar los modelos entrenados
-loaded_models = {}
-
-def get_default_model_path(ticket):
-    """Genera la ruta predeterminada para guardar un modelo entrenado"""
-    return os.path.join(MODEL_DIR, f"xgb_model_{ticket}.joblib") # CAMBIAR
-
-def get_generic_model_path():
-    """ Obtiene la ruta del modelo genérico entrenado previamente """
-    return os.path.join(MODEL_DIR, "xgb_model.joblib")
-
-
-def find_model_for_ticket(ticket):
-    """
-    Busca el modelo entrenado para un ticket específico
-    Retorna la ruta del modelo si se encuentra, de lo contrario None
-    """
-    specific_model_path = get_default_model_path(ticket)
-    if os.path.exists(specific_model_path):
-        return specific_model_path
-    
-    # Si no hay modelo específico, busca un modelo genérico
-    generic_model_path = get_generic_model_path()
-    if os.path.exists(generic_model_path):
-        return generic_model_path
-    
-    # Busca cualquier modelo en el directorio de modelos como último recurso
-    avaliable_models = glob.glob(os.path.join(MODEL_DIR, "xgb_model_*.joblib"))
-    if avaliable_models:
-        return avaliable_models[0]
+def find_xgb_model_path_prefix(ticket: str) -> Optional[str]:
+    specific_prefix = get_default_xgb_model_path_prefix(ticket)
+    if os.path.exists(f"{specific_prefix}_metadata.json"):
+        return specific_prefix
+    metadata_files = glob.glob(os.path.join(MODEL_DIR, "xgb_model_*_metadata.json"))
+    if metadata_files:
+        first_metadata_file = metadata_files[0]
+        prefix = first_metadata_file.replace("_metadata.json", "")
+        print(f"Advertencia: No se encontró modelo XGBoost específico para {ticket}. Usando el primero disponible: {os.path.basename(prefix)}")
+        return prefix
     return None
 
-def load(model_path):
-    """Recupera un modelo de la memoria caché o lo carga desde el disco"""
-    if model_path in loaded_models:
-        return loaded_models[model_path]
-    
+def load_xgb_model_from_prefix(prefix: str) -> TimeSeriesXGBoostModel:
+    if prefix in loaded_xgb_models_cache:
+        print(f"Retornando modelo XGBoost desde caché para el prefijo: {prefix}")
+        return loaded_xgb_models_cache[prefix]
     try:
-        model = XGBoostModel.load(model_path)
-        loaded_models[model_path] = model
+        print(f"Cargando modelo XGBoost desde el prefijo: {prefix}")
+        model = TimeSeriesXGBoostModel.load_model(model_path_prefix=prefix)
+        loaded_xgb_models_cache[prefix] = model
         return model
+    except FileNotFoundError as fnf_error:
+        print(f"Error de archivo no encontrado al cargar modelo XGBoost: {fnf_error}")
+        raise HTTPException(status_code=404, detail=f"Archivos de modelo no encontrados para el prefijo {prefix}: {str(fnf_error)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading model: {str(e)}")
+        print(f"Error detallado al cargar modelo XGBoost desde {prefix}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error cargando modelo XGBoost desde {prefix}: {str(e)}")
 
-def load_stock_data(ticket, start_date, end_date):
-    """Carga los datos de stock para un ticket específico entre las fechas dadas"""
+def load_stock_data_helper(ticket: str, start_date: str, end_date: str) -> pd.DataFrame:
     try:
-        data = load_data(ticket, start_date, end_date)
-        if data.empty:
-            raise HTTPException(status_code=404, detail="No data found for the given ticket and date range.")
-        return data
+        data_df = load_data(ticker=ticket, start_date=start_date, end_date=end_date)
+        if data_df.empty:
+            raise HTTPException(status_code=404,
+                                detail=f"No se encontraron datos para el ticker {ticket} en el rango {start_date} a {end_date}.")
+        return data_df
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading data: {str(e)}")
-
-
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the XGBoost Model API"}
-
-
-@app.get("/train") 
-def train_model():
-    """_
-    Endpoint to train the model
-    """
-    global model, feature_scaler, target_scaler
-    try:
-        print("Manual model training started.")
-        data = load_data()
-        print("Data loaded successfully. Shape:", data.shape)
-
-        processed_data = feature_engineering(data)
-        
-        print("Feature engineering completed. Shape:", processed_data.shape)
-
-        # Split data
-        X_train, X_test, y_train, y_test = split_data(processed_data, train_size=0.8)
-        print("Data split completed. Training data shape:", X_train.shape)
-        
-        # Escalar los datos
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler = scale_data(
-            X_train, X_test, 
-            y_train.values.reshape(-1, 1), 
-            y_test.values.reshape(-1, 1)
-        )
-        print("Data scaling completed.")
-
-        # Train model
-        model = XGBoostModel()
-        model.fit(X_train_scaled, y_train_scaled)
-        print("Model training completed.")
-
-        # Asignar los escaladores al modelo
-        model.feature_scaler = feature_scaler
-        model.target_scaler = target_scaler
-
-        
-        # Save model
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        model_file_path = os.path.join(MODEL_DIR, "xgb_model.joblib")
-        model.save(model_file_path)
-        print(f"Model saved to {MODEL_DIR}")
-        
-        # Evaluate model
-        y_pred_scaled = model.predict(X_test_scaled)
-        y_pred = target_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
-        y_test_original = target_scaler.inverse_transform(y_test_scaled.reshape(-1, 1)).flatten()
-        
-        evaluation_results = model.evaluate(X_test_scaled, y_test_scaled)
-        print("Model evaluation results:", evaluation_results) 
-        
-        # Save metadata
-        metadata = {
-            'model_name': 'XGBoost',
-            'best_params': model.best_params_,
-            'evaluation': evaluation_results,
-            'timestamp': pd.Timestamp.now().isoformat() # se puede añadir ya el scaler
-        }
-        
-        # Convert any numpy types to Python native types for JSON serialization
-        metadata_serializable = {}
-        for k, v in metadata.items():
-            if isinstance(v, dict):
-                metadata_serializable[k] = {sub_k: float(sub_v) if isinstance(sub_v, np.float64) else sub_v 
-                                           for sub_k, sub_v in v.items()}
-            else:
-                metadata_serializable[k] = float(v) if isinstance(v, np.float64) else v
-        
-        with open(json_path, 'w') as f:
-            import json
-            json.dump(metadata_serializable, f, indent=4)
-            
-        return {
-            "message": "Model trained and saved successfully.",
-            "evaluation_results": evaluation_results
-        }
-    except Exception as e:
-        traceback_str = traceback.format_exc()
-        print(f"Error during training: {traceback_str}")
-        raise HTTPException(status_code=500, detail=f"Error during model training: {str(e)}")
-
-
-@app.get("/predict")
-async def predict(
-    ticket: str = Query("NU", description="Ticker of the stock to predict"),
-    forecast_horizon: int = Query(10, description="Forecast horizon in days"),
-    target_col: str = Query("Close", description="Target column for prediction")
-):
-    """
-    Endpoint para hacer predicciones usando el modelo entrenado.
-    
-    Intenta utilizar un modelo específico para el ticket proporcionado. Si no se encuentra, busca un modelo genérico.
-    Ejemplo de uso:
-    GET /predict?ticket=NU&forecast_horizon=10&target_col=Close
-    """
-    try:
-        # Verificar que el ticket no esté vacío
-        model_path = find_model_for_ticket(ticket)
-        if model_path is None:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No trained model found for {ticket}. Train a model first.")
-        
-        try:
-            model = XGBoostModel.load(model_path)
-            print(f"Model loaded successfully from {model_path}")
-            print(f"Model type: {type(model)}")
-            
-            # Verificar que el modelo tiene los atributos necesarios
-            if not hasattr(model, 'n_lags'):
-                raise ValueError("Model missing n_lags attribute")
-
-                
-        except Exception as model_error:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error loading model: {str(model_error)}"
-            )
-        
-        try:
-            end_date = datetime.now()
-            # Usar un período más largo para asegurar suficientes datos
-            start_date = end_date - timedelta(days=365*3)  # Tres años de datos históricos
-            data = load_stock_data(ticket, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
-            
-            print(f"Data loaded: {len(data)} rows, columns: {data.columns.tolist()}")
-            
-            # Verificar que tenemos datos suficientes
-            if data.empty:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No data available for ticker {ticket}"
-                )
-                
-            if target_col not in data.columns:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Target column '{target_col}' not found in data. Available columns: {data.columns.tolist()}"
-                )
-                
-            # Verificar que hay suficientes filas para los rezagos
-            if len(data) <= model.n_lags * 2:  
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Not enough historical data for prediction. Need at least {model.n_lags * 2} rows, but got {len(data)}."
-                )
-                
-        except HTTPException:
+        if isinstance(e, HTTPException):
             raise
-        except Exception as data_error:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error loading stock data: {str(data_error)}"
-            )
+        print(f"Error al cargar datos de acciones para {ticket}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error descargando o procesando datos para {ticket}: {str(e)}")
+
+@app.get("/", tags=["General"])
+async def read_root_xgb():
+    return {"message": "Servicio de Modelos de Series de Tiempo XGBoost"}
+
+# CORRECCIÓN AQUÍ: Cambiar a @app.post y 'request' vendrá del cuerpo de la petición
+@app.post("/train", tags=["XGBoost Training & Management"])
+async def train_model_endpoint(request: TrainRequestXGB): # 'request' ahora es el cuerpo JSON
+    """
+    Trains an XGBoost time series model based on the provided request parameters (sent in JSON body).
+    """
+    try:
+        print(f"Solicitud de entrenamiento XGBoost recibida para el ticker: {request.ticket}")
         
-        try:
-            forecast = forecast_future_prices(
-                model=model,
-                data=data,
-                forecast_horizon=forecast_horizon,
-                target_col=target_col
+        # Determinar start_date y end_date
+        # Prioridad: request.start_date/end_date, luego request.training_period, luego defaults.
+        start_date_to_load = request.start_date
+        end_date_to_load = request.end_date
+
+        data_df = load_stock_data_helper(request.ticket, start_date_to_load, end_date_to_load)
+
+        save_prefix = request.save_model_path_prefix or get_default_xgb_model_path_prefix(request.ticket)
+        
+        print(f"Iniciando entrenamiento del modelo XGBoost. Se guardará con prefijo: {save_prefix}")
+        
+        trained_model_obj, feature_names, residuals, residual_dates, acf_vals, pacf_vals, confint_acf, confint_pacf = train_xgb_model(
+            data=data_df,
+            target_col=request.target_col,
+            n_lags=request.n_lags,
+            train_size_ratio=request.train_size_ratio,
+            save_model_path_prefix=save_prefix
+        )
+
+        loaded_xgb_models_cache[save_prefix] = trained_model_obj
+
+        response = {
+            "status": "success",
+            "message": f"Modelo XGBoost entrenado exitosamente para {request.ticket}",
+            "model_type": "XGBoost",
+            "model_path_prefix": os.path.basename(save_prefix),
+            "metrics": trained_model_obj.metrics if hasattr(trained_model_obj, 'metrics') else "Métricas no disponibles.",
+            "feature_names_used": feature_names,
+            "residuals_length": len(residuals) if residuals is not None else 0,
+            "acf_values_length": len(acf_vals) if acf_vals is not None else 0,
+            "pacf_values_length": len(pacf_vals) if pacf_vals is not None else 0
+        }
+        if hasattr(trained_model_obj, 'best_params_') and trained_model_obj.best_params_:
+            serializable_best_params = {}
+            for k, v in trained_model_obj.best_params_.items():
+                if isinstance(v, (np.ndarray, list)):
+                    serializable_best_params[k] = [item.item() if hasattr(item, 'item') else item for item in v]
+                elif hasattr(v, 'item'): 
+                    serializable_best_params[k] = v.item()
+                else:
+                    serializable_best_params[k] = v
+            response["best_hyperparameters"] = serializable_best_params
+        
+        return response
+
+    except HTTPException:
+        raise 
+    except Exception as e:
+        print(f"Error detallado durante el entrenamiento XGBoost: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error entrenando modelo XGBoost: {str(e)}")
+
+
+@app.get("/predict", tags=["XGBoost Prediction"])
+async def predict_endpoint(
+    ticket: str = Query("NU", description="Ticker de la acción a predecir"),
+    forecast_horizon: int = Query(10, description="Horizonte de pronóstico en días"),
+    target_col: str = Query("Close", description="Columna objetivo para la predicción"),
+    history_days: int = Query(252, description="Número de días hábiles históricos a devolver en la respuesta (aprox. 1 año)")
+):
+    try:
+        print(f"Solicitud de predicción XGBoost recibida para el ticker: {ticket}")
+        model_prefix = find_xgb_model_path_prefix(ticket)
+        if not model_prefix:
+            raise HTTPException(status_code=404,
+                                detail=f"No se encontró un modelo XGBoost entrenado para {ticket} o un modelo de fallback.")
+
+        print(f"Cargando modelo XGBoost desde el prefijo: {model_prefix}")
+        model = load_xgb_model_from_prefix(model_prefix)
+        
+        # Lógica de fechas para predicción mejorada
+        # Usar la fecha de fin de entrenamiento del modelo si está disponible, si no, hoy.
+        end_date_for_historical_load = datetime.now()
+        metadata_path_for_predict = f"{model_prefix}_metadata.json"
+        if os.path.exists(metadata_path_for_predict):
+            try:
+                with open(metadata_path_for_predict, 'r') as f_meta:
+                    metadata = json.load(f_meta)
+                    training_end_str = metadata.get('training_end_date')
+                    if training_end_str:
+                        end_date_for_historical_load = datetime.strptime(training_end_str, "%Y-%m-%d")
+                        print(f"Usando fecha de fin de entrenamiento del modelo para cargar datos históricos: {training_end_str}")
+            except Exception as meta_err:
+                print(f"Advertencia: No se pudo leer la fecha de fin de entrenamiento de los metadatos ({meta_err}). Usando fecha actual.")
+
+
+        days_to_load_for_prediction = model.n_lags + 252 # n_lags + approx 1 year for context
+        start_date_for_prediction = end_date_for_historical_load - timedelta(days=days_to_load_for_prediction * 1.5) # Cargar un poco más por días no hábiles
+
+        print(f"Cargando datos históricos para predicción ({days_to_load_for_prediction} días) desde {start_date_for_prediction.strftime('%Y-%m-%d')} hasta {end_date_for_historical_load.strftime('%Y-%m-%d')}...")
+        historical_data_df = load_stock_data_helper(
+            ticket,
+            start_date_for_prediction.strftime("%Y-%m-%d"),
+            end_date_for_historical_load.strftime("%Y-%m-%d") # Cargar hasta la fecha de fin de entrenamiento o hoy
+        )
+        
+        if len(historical_data_df) < model.n_lags + 5:
+             raise HTTPException(
+                status_code=400,
+                detail=f"No hay suficientes datos históricos ({len(historical_data_df)} filas) para la predicción. Se necesitan al menos {model.n_lags + 5} después de cargar hasta {end_date_for_historical_load.strftime('%Y-%m-%d')}."
             )
-            print('Predictions:', forecast)
-            last_date = data.index[-1]
-            forecast_dates = [(last_date + timedelta(days=i+1)).strftime("%Y-%m-%d") 
-                            for i in range(forecast_horizon)]
-            
-            predictions = [{"date": date, "prediction": float(pred)} 
-                        for date, pred in zip(forecast_dates, forecast)]
-            
-            model_info = "Modelo específico para el ticker" if ticket in model_path else "Modelo genérico"
-            
-            return {
-                "status": "success",
-                "ticker": ticket,
-                "target_column": target_col,
-                "forecast_horizon": forecast_horizon,
-                "predictions": predictions,
-                "last_actual_date": last_date.strftime("%Y-%m-%d"),
-                "last_actual_value": float(data[target_col].iloc[-1]),
-                "model_used": os.path.basename(model_path),
-                "model_info": model_info
-            }
-            
-        except Exception as forecast_error:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"Forecast error details: {error_details}")
-            
-            if "Found array with 0 sample(s)" in str(forecast_error):
-                raise HTTPException(
-                    status_code=500,
-                    detail="Error during data scaling: Empty array encountered. This typically happens when data preparation removes all rows. Check if your historical data matches the format expected by the model."
-                )
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error making prediction: {str(forecast_error)}"
-                )
-    
+
+        print("Realizando pronóstico XGBoost...")
+        forecast_values, lower_bounds, upper_bounds = forecast_future_prices_xgb(
+            model=model,
+            data=historical_data_df.copy(), 
+            forecast_horizon=forecast_horizon,
+            target_col=target_col
+        )
+
+        last_actual_date_in_data = historical_data_df.index[-1]
+        forecast_dates = pd.date_range(
+            start=last_actual_date_in_data + pd.tseries.offsets.BDay(1), 
+            periods=forecast_horizon,
+            freq='B' 
+        ).strftime('%Y-%m-%d').tolist()
+        
+        if len(forecast_values) != len(forecast_dates):
+             print(f"Advertencia: La longitud de los valores pronosticados ({len(forecast_values)}) no coincide con las fechas de pronóstico ({len(forecast_dates)}). Ajustando...")
+             min_len = min(len(forecast_values), len(forecast_dates))
+             forecast_values = forecast_values[:min_len]
+             lower_bounds = lower_bounds[:min_len]
+             upper_bounds = upper_bounds[:min_len]
+             forecast_dates = forecast_dates[:min_len]
+
+        predictions_list = [
+            {
+                "date": forecast_dates[i],
+                "prediction": float(forecast_values[i]),
+                "lower_bound": float(lower_bounds[i]) if not np.isnan(lower_bounds[i]) else None, 
+                "upper_bound": float(upper_bounds[i]) if not np.isnan(upper_bounds[i]) else None, 
+            } for i in range(len(forecast_dates))
+        ]
+
+        historical_data_to_return = historical_data_df.iloc[-history_days:]
+
+        return {
+            "status": "success",
+            "ticker": ticket,
+            "model_type": "XGBoost",
+            "target_column": target_col,
+            "forecast_horizon": forecast_horizon,
+            "historical_dates": historical_data_to_return.index.strftime('%Y-%m-%d').tolist(),
+            "historical_values": [val if not np.isnan(val) else None for val in historical_data_to_return[target_col].tolist()],
+            "predictions": predictions_list,
+            "last_actual_date": last_actual_date_in_data.strftime("%Y-%m-%d"),
+            "last_actual_value": float(historical_data_df[target_col].iloc[-1]) if not np.isnan(historical_data_df[target_col].iloc[-1]) else None,
+            "model_used_prefix": os.path.basename(model_prefix)
+        }
+
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Error detallado durante la predicción XGBoost: {e}")
         import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error en predicción XGBoost: {str(e)}")
 
-@app.get("/models")
-async def list_models():
-    """
-    Endpoint para listar los modelos entrenados disponibles.
-    
-    Devuelve una lista de modelos con su ruta y tipo (específico o genérico).
-    """
+
+@app.get("/models", tags=["XGBoost Training & Management"])
+async def list_xgb_models():
     try:
-        models = glob.glob(os.path.join(MODEL_DIR, "xgb_model*.joblib"))
-        model_info = []
+        metadata_files = glob.glob(os.path.join(MODEL_DIR, "xgb_model_*_metadata.json"))
+        models_info = []
 
-        for model_path in models:
-            model_name = os.path.basename(model_path)
-            metadata = model_path.replace(',joblib', "_metadata.json")
-            metadata = None
+        for meta_file_path in metadata_files:
+            model_prefix = meta_file_path.replace("_metadata.json", "")
+            model_name = os.path.basename(model_prefix) 
+            
+            metadata_content = {"error": "No se pudo cargar el archivo de metadatos."}
+            try:
+                with open(meta_file_path, 'r') as f:
+                    metadata_content = json.load(f)
+            except Exception as e:
+                print(f"Error al cargar metadatos desde {meta_file_path}: {e}")
+            
+            total_size_bytes = 0
+            # Construct full paths for size calculation based on prefix and metadata content
+            base_dir_for_model_files = os.path.dirname(meta_file_path) # Directory where metadata file is
+            
+            pipeline_filename = metadata_content.get('pipeline_file') # Should be just basename
+            components_filename = metadata_content.get('components_file') # Should be just basename
 
-            if os.path.exists(metadata):
-                try:
-                    import json
-                    with open(metadata, 'r') as f:
-                        metadata = json.load(f)
-                except:
-                    metadata = {"error": "Cloud not load metadata"}
+            if pipeline_filename:
+                pipeline_full_path = os.path.join(base_dir_for_model_files, pipeline_filename)
+                if os.path.exists(pipeline_full_path):
+                    total_size_bytes += os.path.getsize(pipeline_full_path)
+            if components_filename:
+                components_full_path = os.path.join(base_dir_for_model_files, components_filename)
+                if os.path.exists(components_full_path):
+                    total_size_bytes += os.path.getsize(components_full_path)
 
-            model_info.append({
+            if os.path.exists(meta_file_path):
+                 total_size_bytes += os.path.getsize(meta_file_path)
+
+            models_info.append({
                 "name": model_name,
-                "path": model_path,
-                "metadata": metadata,
-                "size_mb": round(os.path.getsize(model_path) / (1024 * 1024), 2),  # Tamaño en MB
+                "path_prefix_basename": os.path.basename(model_prefix), 
+                "metadata_file": os.path.basename(meta_file_path),
+                "metadata_content": metadata_content,
+                "estimated_size_mb": round(total_size_bytes / (1024 * 1024), 3) if total_size_bytes > 0 else "N/A",
             })
-            return {
-                "total_models": len(model_info),
-                "models": model_info
-            }
 
-    except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error listing models: {str(e)}")
-@app.get("/evaluate") 
-def evaluate_model():
-    """
-    Endpoint to evaluate the model on test data
-    """
-    try:
-        # Check if model exists
-        model_path = get_generic_model_path()
-        if not os.path.exists(model_path):
-            raise HTTPException(status_code=404, detail="Model not found. Please train the model first.")
-        
-        # Load model
-        model = XGBoostModel.load(model_path)
-        
-        # Load data
-        data = load_data()
-        processed_data = feature_engineering(data)
-        X_train, X_test, y_train, y_test = split_data(processed_data, train_size=0.8)
-        
-        # Create new scalers for this evaluation
-        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler = scale_data(
-            X_train, X_test, 
-            y_train.values.reshape(-1, 1), 
-            y_test.values.reshape(-1, 1)
-        )
-        
-        # Make predictions using scaled data
-        y_pred_scaled = model.predict(X_test_scaled)
-        
-        # Inverse transform predictions and actual values
-        y_pred = target_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
-        y_test_original = target_scaler.inverse_transform(y_test_scaled.reshape(-1, 1)).flatten()
-        
-        # Evaluate using both scaled and original data
-        evaluation_results = model.evaluate(X_test_scaled, y_test_scaled)
-        original_metrics = model.evaluate(X_test, y_test.values)
-        
         return {
-            "evaluation_results_scaled": evaluation_results,
-            "evaluation_results_original": original_metrics,
-            "sample_predictions": {
-                "predicted": y_pred[:5].tolist(),
-                "actual": y_test_original[:5].tolist()
-            }
+            "total_models": len(models_info),
+            "models": models_info
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error during model evaluation: {str(e)}")
-    
+        print(f"Error listando modelos XGBoost: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listando modelos XGBoost: {str(e)}")
+
+@app.get("/health", tags=["General"])
+async def health_check_xgb():
+    return {"status": "Ok", "service": "XGBoost Time Series Model Service"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-#script to run the server
-'''
-.venv\Scripts\activate 
-python -m services.model_xgb.app
-
-'''
+    uvicorn.run(app, host="0.0.0.0", port=8003)
