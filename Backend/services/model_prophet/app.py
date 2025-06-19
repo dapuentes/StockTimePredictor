@@ -1,250 +1,265 @@
-from pathlib import Path
-import sys
-import os
-from datetime import datetime, timedelta
-import glob
-#current_dir = Path(__file__).parent
-#project_dir = current_dir.parent.parent  # Navigate up to the project root
-#sys.path.append(str(project_dir))
-from services.model_xgb.forecast import forecast_future_prices
 from fastapi import FastAPI, HTTPException, Query
-import pandas as pd
 from pydantic import BaseModel
-import joblib
+import pandas as pd
 import numpy as np
-from apscheduler.schedulers.background import BackgroundScheduler
-from contextlib import asynccontextmanager
-from services.model_prophet.prophet_model import ProphetModel, train_prophet_model
-from utils.import_data import load_data
-from utils.preprocessing import feature_engineering, split_data, scale_data
-import traceback
-from sklearn.model_selection import TimeSeriesSplit
-import services.model_prophet.prophet_service as prophet_service
-from typing import List, Dict, Optional
-#
+from typing import Optional, List, Dict, Any
+import os
+import glob
+import json
+from datetime import datetime, timedelta
+import sys
+
+# --- Ajuste del sys.path para importaciones ---
+try:
+    # Intenta importar asumiendo que el PYTHONPATH está correctamente configurado
+    from utils.import_data import load_data
+    from services.model_prophet.prophet_model import ProphetModel
+    from services.model_prophet.train_prophet import train_model as train_prophet_pipeline
+    from services.model_prophet.forecast import forecast_future_prices_prophet
+except ImportError:
+    # Si falla, ajusta el path manualmente y reintenta
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
+    if backend_dir not in sys.path:
+        sys.path.append(backend_dir)
+    from utils.import_data import load_data
+    from services.model_prophet.prophet_model import ProphetModel
+    from services.model_prophet.train_prophet import train_model as train_prophet_pipeline
+    from services.model_prophet.forecast import forecast_future_prices_prophet
+
+# --- Configuración de la App FastAPI ---
 app = FastAPI(
-    title="Prophet Model API",
-    description="API for Prophet Regression model",
-    version="1.0.0",
+    title="Prophet Time Series Model Service",
+    version="1.0.3",
+    description="Un servicio para entrenar y realizar predicciones con modelos Prophet para series temporales."
 )
 
-# Define the model path
-MODEL_DIR = "services/model_prophet/models"
-os.makedirs(MODEL_DIR, exist_ok=True)
-
-model_path = os.path.join(MODEL_DIR, "model_prophet.joblib")
-json_path = os.path.join(MODEL_DIR, "model_prophet.json")
-
-class TrainRequest(BaseModel):
-    ticker: str = 'NU'
-    start_date: str = '2020-12-10'
-    end_date: str = datetime.now().strftime("%Y-%m-%d")
-#    n_lags: int = 10 
-    target_col: str = 'Close'
-    regressor_cols: list = ['Open', 'High', 'Low', 'Volume']
+# --- Modelos Pydantic para Requests ---
+class TrainRequestProphet(BaseModel):
+    ticker: str = "NU"
+    start_date: str = "2020-01-01"
+    end_date: str = datetime.now().strftime('%Y-%m-%d')
+    target_col: str = "Close"
     train_size: float = 0.8
-    save_model_path: str = None
+    # El path se genera automáticamente, pero se puede sobreescribir
+    model_path_prefix: Optional[str] = None
 
+# --- Gestión de Modelos y Caching ---
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+loaded_prophet_models_cache: Dict[str, ProphetModel] = {}
 
-# Diccionario global para almacenar el modelo
+def get_default_prophet_model_path_prefix(ticker: str) -> str:
+    """Genera el prefijo de ruta por defecto para un modelo de un ticker específico."""
+    return os.path.join(MODEL_DIR, f"prophet_model_{ticker.upper()}")
 
-loaded_models = {}
-
-def get_default_model_path(ticket):
-    """Genera la ruta predeterminada para guardar un modelo entrenado"""
-    return os.path.join(MODEL_DIR, f"prophet_model{ticket}.joblib")
-
-
-def get_generic_model_path():
-    """ Obtiene la ruta del modelo genérico entrenado previamente """
-    return os.path.join(MODEL_DIR, "model_prophet.joblib")
-
-
-def find_model_for_ticket(ticket):
-    """
-    Busca el modelo entrenado para un ticket específico
-    Retorna la ruta del modelo si se encuentra, de lo contrario None
-    """
-    specific_model_path = get_default_model_path(ticket)
-    if os.path.exists(specific_model_path):
-        return specific_model_path
+def find_prophet_model_path_prefix(ticker: str) -> Optional[str]:
+    """Encuentra el prefijo de un modelo para un ticker, con fallback al primero disponible."""
+    specific_prefix = get_default_prophet_model_path_prefix(ticker)
+    # Comprueba si existe el archivo de metadatos para el modelo específico
+    if os.path.exists(f"{specific_prefix}_metadata.json"):
+        return specific_prefix
     
-    # Si no hay modelo específico, busca un modelo genérico
-    generic_model_path = get_generic_model_path()
-    if os.path.exists(generic_model_path):
-        return generic_model_path
-    
-    # Busca cualquier modelo en el directorio de modelos como último recurso
-    avaliable_models = glob.glob(os.path.join(MODEL_DIR, "model_prophet*.joblib"))
-    if avaliable_models:
-        return avaliable_models[0]
+    # Si no, busca cualquier otro modelo Prophet como fallback
+    metadata_files = glob.glob(os.path.join(MODEL_DIR, "prophet_model_*_metadata.json"))
+    if metadata_files:
+        first_metadata_file = sorted(metadata_files)[0]
+        prefix = first_metadata_file.replace("_metadata.json", "")
+        print(f"ADVERTENCIA: No se encontró modelo Prophet para {ticker}. Usando el primero disponible: {os.path.basename(prefix)}")
+        return prefix
     return None
 
-def load(model_path):
-    """Recupera un modelo de la memoria caché o lo carga desde el disco"""
-    if model_path in loaded_models:
-        return loaded_models[model_path]
+def load_prophet_model_from_prefix(prefix: str) -> ProphetModel:
+    """Carga un modelo Prophet desde un prefijo, usando caché para eficiencia."""
+    if prefix in loaded_prophet_models_cache:
+        print(f"Retornando modelo Prophet desde caché para el prefijo: {os.path.basename(prefix)}")
+        return loaded_prophet_models_cache[prefix]
     
     try:
-        model = ProphetModel.load(model_path)
-        loaded_models[model_path] = model
+        print(f"Cargando modelo Prophet desde el prefijo: {os.path.basename(prefix)}")
+        model = ProphetModel.load_model(model_path_prefix=prefix)
+        loaded_prophet_models_cache[prefix] = model
         return model
+    except FileNotFoundError as fnf_error:
+        raise HTTPException(status_code=404, detail=f"Archivos de modelo no encontrados para el prefijo {os.path.basename(prefix)}: {fnf_error}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading model: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error cargando modelo Prophet desde {os.path.basename(prefix)}: {e}")
 
-def load_stock_data(ticket, start_date, end_date):
-    """Carga los datos de stock para un ticket específico entre las fechas dadas"""
+def load_stock_data_helper(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Función de ayuda para cargar datos de acciones, con manejo de errores."""
     try:
-        data = load_data(ticket, start_date, end_date)
-        if data.empty:
-            raise HTTPException(status_code=404, detail="No data found for the given ticket and date range.")
-        return data
+        data_df = load_data(ticker=ticker, start_date=start_date, end_date=end_date)
+        if data_df.empty:
+            raise HTTPException(status_code=404, detail=f"No se encontraron datos para el ticker {ticker} en el rango {start_date} a {end_date}.")
+        return data_df
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading data: {str(e)}")
-    
-def load_trained_model(path: str) -> ProphetModel:
-    return ProphetModel.load(path)
+        if isinstance(e, HTTPException): raise e
+        raise HTTPException(status_code=500, detail=f"Error descargando o procesando datos para {ticker}: {e}")
 
-@app.get('/')
-def read_root():
-    return {"message": "Welcome to the Prophet Model API!"}
+# --- Endpoints de la API ---
 
-@app.get('/train')
-def train_model():
-    '''
-    Endpoint para entrenar el modelo Prophet
-    '''
-    global model, feature_scaler, target_scaler
+@app.get("/", tags=["General"])
+async def read_root_prophet():
+    return {"message": "Servicio de Modelos de Series de Tiempo Prophet"}
+
+
+@app.post("/train", tags=["Training & Management"])
+async def train_model_endpoint(request: TrainRequestProphet):
+    """
+    Entrena un modelo de series de tiempo Prophet según los parámetros proporcionados.
+    """
     try:
-        model = ProphetModel()
-        print('Manual training of the model started')
-        data = load_data()
-        if data.empty:
-            raise HTTPException(status_code=404, detail="No data found for the given ticket and date range.")
-
-        #processed_data = feature_engineering(data, n_lags=10, target_col='Close')
-
-        model, metrics, _ = prophet_service.train(
-            data=data,
-            target_col='Close',
-            regressor_cols=['Open','High','Low','Volume'],
-            train_size=0.8,
-            optimize_hyperparams=True,
-            save_model_path=os.path.join(MODEL_DIR, "model_prophet.joblib"),
-            plot_results=False,         # Desactivar gráficos en API
-            forecast_horizon=None       # No necesitamos forecast aquí
+        print(f"Solicitud de entrenamiento Prophet recibida para el ticker: {request.ticker}")
+        data_df = load_stock_data_helper(request.ticker, request.start_date, request.end_date)
+        
+        # --- LÍNEA CORREGIDA ---
+        # El prefijo ahora se genera aquí y se pasa directamente, evitando la doble concatenación.
+        save_prefix = request.model_path_prefix or get_default_prophet_model_path_prefix(request.ticker)
+        
+        print(f"Iniciando entrenamiento del modelo Prophet. Se guardará con prefijo: {os.path.basename(save_prefix)}")
+        
+        # El pipeline de entrenamiento ahora recibe el prefijo final y no lo modifica.
+        trained_model, metrics = train_prophet_pipeline(
+            ticker=request.ticker,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            target_col=request.target_col,
+            train_size=request.train_size,
+            model_path_prefix=save_prefix # Pasamos el prefijo ya completo
         )
 
-        print("Model training completed.")
+        # Cache the newly trained model
+        loaded_prophet_models_cache[save_prefix] = trained_model
 
-        # Guardar el modelo
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        model_file_path = os.path.join(MODEL_DIR, "model_prophet.joblib")
-        model.save(model_file_path)
-        print(f"Model saved to {MODEL_DIR}")
-
-        # Metadata
-        metadata = {
-            "model_type": "Prophet",
-            "model_path": model_file_path,
-            'best_params': model.best_params_,
-            "evaluation_results": metrics,
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
-        # Convert any numpy types to Python native types for JSON serialization
-        metadata_serializable = {}
-        for k, v in metadata.items():
-            if isinstance(v, dict):
-                metadata_serializable[k] = {sub_k: float(sub_v) if isinstance(sub_v, np.float64) else sub_v 
-                                            for sub_k, sub_v in v.items()}
-            else:
-                metadata_serializable[k] = float(v) if isinstance(v, np.float64) else v
-        
-        with open(json_path, 'w') as f:
-            import json
-            json.dump(metadata_serializable, f, indent=4)
-            
         return {
-            "message": "Modelo Prophet entrenado y guardado exitosamente.",
-            "evaluation_results": metrics
+            "status": "success",
+            "message": f"Modelo Prophet entrenado exitosamente para {request.ticker}",
+            "model_type": "Prophet",
+            "model_path_prefix": os.path.basename(save_prefix),
+            "metrics": metrics
         }
-
-
+    except HTTPException:
+        raise
     except Exception as e:
-        print("Error during training:", str(e))
+        import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error during training: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error entrenando modelo Prophet: {str(e)}")
 
-
-######### VERSION PRE MODIFICACIONES ##########
-
-@app.get("/evaluate")
-def evaluate_model(train_size: float = Query(0.8, ge=0.1, le=0.99)):
-    # 1. carga modelo
-    path = get_generic_model_path()
-    if not os.path.exists(path):
-        raise HTTPException(404, "No hay modelo entrenado.")
-    model = load_trained_model(path)
-
-    # 2. carga datos
-    data = load_data()  # o usa ticket/start/end si lo defines
-    if data.empty:
-        raise HTTPException(404, "No hay datos para evaluar.")
-
-    # 3. delega en el servicio
-    result = prophet_service.evaluate(model, data, train_size=train_size)
-    return result
-
-
-
-@app.get("/predict")
-def predict(
-    ticket: str = Query("NU"),
-    horizon: int = Query(10, gt=0),
-    target_col: str = Query("Close"),
-    regressor_cols: List[str] = Query(['Open','High','Low','Volume'])
+@app.get("/predict", tags=["Prediction"])
+async def predict_endpoint(
+    ticker: str = Query("NU", description="Ticker de la acción a predecir"),
+    forecast_horizon: int = Query(15, description="Horizonte de pronóstico en días"),
+    target_col: str = Query("Close", description="Columna objetivo para la predicción"),
+    history_days: int = Query(90, description="Número de días de datos históricos a devolver")
 ):
-    # 1) Carga modelo
-    path = find_model_for_ticket(ticket)
-    if path is None:
-        raise HTTPException(404, f"No hay modelo para {ticket}")
-    model = load_trained_model(path)
+    """
+    Realiza una predicción utilizando un modelo Prophet entrenado.
+    Carga el historial de datos completo que necesita el modelo para asegurar
+    la correcta alineación de fechas y el cálculo de regresores.
+    """
+    try:
+        print(f"Solicitud de predicción Prophet recibida para el ticker: {ticker}")
+        
+        # 1. Encontrar el prefijo del modelo para el ticker solicitado.
+        model_prefix = find_prophet_model_path_prefix(ticker)
+        if not model_prefix:
+            raise HTTPException(status_code=404, detail=f"No se encontró un modelo Prophet entrenado para {ticker}.")
 
-    # 2) Datos históricos
-    end = datetime.now()
-    start = end - timedelta(days=365*3)
-    data = load_data(ticket, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
-    if data.empty:
-        raise HTTPException(404, "No hay datos históricos.")
+        # 2. Cargar el modelo desde el archivo (o desde la caché si ya está cargado).
+        model = load_prophet_model_from_prefix(model_prefix)
+        
+        # --- LÓGICA DE CARGA DE DATOS SINCRONIZADA ---
+        # 3. Obtener el rango de fechas directamente del historial del modelo cargado.
+        #    Esto es CRUCIAL para evitar desajustes de fechas entre el modelo y los datos.
+        start_date_for_prediction = model.model.history['ds'].min()
+        end_date_for_historical_load = model.model.history['ds'].max()
+        
+        print(f"Rango de datos requerido por el modelo: {start_date_for_prediction.strftime('%Y-%m-%d')} a {end_date_for_historical_load.strftime('%Y-%m-%d')}")
 
-    # 3) Forecast usando el servicio
-    preds = prophet_service.predict(
-        model=model,
-        data=data,
-        forecast_horizon=horizon,
-        regressor_cols=regressor_cols,
-        target_col=target_col
-    )
+        # 4. Cargar el historial completo que el modelo necesita para sus cálculos.
+        print(f"Cargando datos históricos para predicción...")
+        historical_data_df = load_stock_data_helper(
+            ticker,
+            start_date_for_prediction.strftime("%Y-%m-%d"),
+            end_date_for_historical_load.strftime("%Y-%m-%d")
+        )
+        
+        # 5. Llamar a la función de pronóstico con los datos correctamente alineados.
+        print("Realizando pronóstico Prophet...")
+        forecast_values, lower_bounds, upper_bounds = forecast_future_prices_prophet(
+            model=model,
+            data=historical_data_df.copy(),
+            forecast_horizon=forecast_horizon,
+            target_col=target_col
+        )
 
-    return {
-        "ticker": ticket,
-        "target_column": target_col,
-        "forecast_horizon": horizon,
-        "predictions": preds,
-        "last_actual_date": data.index[-1].strftime("%Y-%m-%d"),
-        "last_actual_value": float(data[target_col].iloc[-1])
-    }
+        # 6. Preparar la respuesta JSON.
+        last_actual_date_in_data = historical_data_df.index.max()
+        # Se generan las fechas para el pronóstico usando días hábiles ('B').
+        forecast_dates = pd.date_range(
+            start=last_actual_date_in_data + pd.tseries.offsets.BDay(1),
+            periods=len(forecast_values), # Se usa la longitud real del pronóstico.
+            freq='B'
+        ).strftime('%Y-%m-%d').tolist()
+        
+        predictions_list = [{
+            "date": forecast_dates[i],
+            "prediction": float(forecast_values[i]),
+            "lower_bound": float(lower_bounds[i]),
+            "upper_bound": float(upper_bounds[i])
+        } for i in range(len(forecast_dates))]
+
+        # Se seleccionan los últimos N días de historial para incluir en la respuesta.
+        historical_data_to_return = historical_data_df.iloc[-history_days:]
+
+        return {
+            "status": "success", "ticker": ticker, "model_type": "Prophet",
+            "target_column": target_col, "forecast_horizon": forecast_horizon,
+            "historical_dates": historical_data_to_return.index.strftime('%Y-%m-%d').tolist(),
+            "historical_values": [val if not np.isnan(val) else None for val in historical_data_to_return[target_col].tolist()],
+            "predictions": predictions_list,
+            "last_actual_date": last_actual_date_in_data.strftime("%Y-%m-%d"),
+            "last_actual_value": float(historical_data_df[target_col].iloc[-1]),
+            "model_used_prefix": os.path.basename(model_prefix)
+        }
+        
+    except HTTPException:
+        # Re-lanzar excepciones HTTP para que FastAPI las maneje.
+        raise
+    except Exception as e:
+        # Capturar cualquier otro error y devolver una respuesta de error 500.
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error en predicción Prophet: {str(e)}")
+
+@app.get("/models", tags=["Training & Management"])
+async def list_prophet_models():
+    """Lista todos los modelos Prophet entrenados disponibles."""
+    try:
+        metadata_files = glob.glob(os.path.join(MODEL_DIR, "prophet_model_*_metadata.json"))
+        models_info = []
+        for meta_file_path in metadata_files:
+            model_prefix = meta_file_path.replace("_metadata.json", "")
+            try:
+                with open(meta_file_path, 'r') as f:
+                    metadata = json.load(f)
+                models_info.append({
+                    "name": os.path.basename(model_prefix),
+                    "metadata": metadata
+                })
+            except Exception as e:
+                print(f"Error al leer metadatos de {meta_file_path}: {e}")
+        return {"total_models": len(models_info), "models": models_info}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listando modelos Prophet: {str(e)}")
+
+@app.get("/health", tags=["General"])
+async def health_check_prophet():
+    return {"status": "Ok", "service": "Prophet Time Series Model Service"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
-
-
-#script to run the server
-'''
-.venv\Scripts\activate 
-python -m services.model_prophet.app
-
-'''
-
+    # El puerto 8004 es el asignado para Prophet en el docker-compose y api-gateway
+    uvicorn.run(app, host="0.0.0.0", port=8004)

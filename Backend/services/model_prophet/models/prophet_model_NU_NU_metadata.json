@@ -1,0 +1,14 @@
+{
+    "model_type": "Prophet",
+    "best_params": null,
+    "metrics": {
+        "MSE": 9.780039647162079,
+        "RMSE": 3.1273054930981847,
+        "MAE": 2.961363884026188,
+        "MAPE": 0.37836229164147894
+    },
+    "timestamp": "2025-06-17T07:07:41.009561",
+    "training_end_date": "2023-08-07",
+    "prophet_model_file": "prophet_model_NU_NU_prophet.json",
+    "components_file": "prophet_model_NU_NU_components.joblib"
+}

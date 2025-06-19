@@ -415,47 +415,21 @@ class XGBoostPreprocessor(BasePreprocessor):
         target_scaler = None   # Raw target values for XGBoost
         return feature_scaler, target_scaler
 
-
 class ProphetPreprocessor(BasePreprocessor):
     """Preprocessor optimized for Prophet models."""
     
     def __init__(self):
         super().__init__()
     
-    def prepare_prophet_format(self, data, target_col='Close'):
-        """Convert data to Prophet's required format."""
-        try:
-            # Prophet requires 'ds' (datestamp) and 'y' (target) columns
-            prophet_data = pd.DataFrame()
-            
-            # Ensure datetime index
-            if not isinstance(data.index, pd.DatetimeIndex):
-                data.index = pd.to_datetime(data.index)
-            
-            prophet_data['ds'] = data.index
-            prophet_data['y'] = data[target_col]
-            
-            return prophet_data
-            
-        except Exception as e:
-            print(f"Error in prepare_prophet_format: {e}")
-            raise
-    
     def add_prophet_regressors(self, data):
         """Add external regressors for Prophet."""
         try:
             data_result = data.copy()
             
-            # Prophet can use these as additional regressors
-            # Simple features that Prophet can't learn automatically
-            
-            # Volume (if available)
             if 'Volume' in data_result.columns:
                 data_result['volume_ma'] = data_result['Volume'].rolling(window=7, min_periods=1).mean()
-                data_result['volume_trend'] = data_result['Volume'].pct_change().fillna(0)
+                data_result['volume_trend'] = data_result['Volume'].pct_change()
             
-            # External market indicators
-            # RSI (simplified)
             if len(data_result) >= 14:
                 delta = data_result['Close'].diff()
                 gain = delta.where(delta > 0, 0).rolling(window=14, min_periods=1).mean()
@@ -463,39 +437,60 @@ class ProphetPreprocessor(BasePreprocessor):
                 rs = gain / (loss + 1e-10)
                 data_result['rsi'] = 100 - (100 / (1 + rs))
             
-            # Moving average ratio
             if len(data_result) >= 20:
                 ma_20 = data_result['Close'].rolling(window=20, min_periods=1).mean()
                 data_result['price_to_ma'] = data_result['Close'] / (ma_20 + 1e-10)
             
             return data_result
-            
         except Exception as e:
             print(f"Error in add_prophet_regressors: {e}")
             raise
     
     def prepare_data(self, data, target_col='Close'):
-        """Complete preprocessing for Prophet."""
-        # Add regressors first
-        data_with_regressors = self.add_prophet_regressors(data)
+        """
+        Complete preprocessing for Prophet with a more robust, linear flow.
+        """
+        # 1. Create a working copy and add all technical indicators (regressors).
+        processed_df = self.add_prophet_regressors(data.copy())
+
+        # 2. Add 'ds' and 'y' columns from the index and target.
+        processed_df['ds'] = processed_df.index
+        processed_df['y'] = processed_df[target_col]
+
+        # --- LÍNEA AÑADIDA PARA LA CORRECCIÓN DE TIMEZONE ---
+        # Prophet no soporta zonas horarias en la columna 'ds'.
+        # .dt.tz_localize(None) elimina la información de la zona horaria.
+        processed_df['ds'] = processed_df['ds'].dt.tz_localize(None)
+
+        # 3. Define the final set of columns needed for the model.
+        final_cols = ['ds', 'y', 'volume_ma', 'volume_trend', 'rsi', 'price_to_ma']
+        # Filter for columns that were actually created.
+        existing_cols = [col for col in final_cols if col in processed_df.columns]
         
-        # Convert to Prophet format
-        prophet_data = self.prepare_prophet_format(data_with_regressors, target_col)
-        
-        # Add regressor columns to Prophet dataframe
-        regressor_cols = ['volume_ma', 'volume_trend', 'rsi', 'price_to_ma']
-        for col in regressor_cols:
-            if col in data_with_regressors.columns:
-                prophet_data[col] = data_with_regressors[col].values
-        
-        print(f"Prophet preprocessing completed. Shape: {prophet_data.shape}")
-        return prophet_data
+        # 4. Select only the needed columns into a new DataFrame.
+        final_prophet_df = processed_df[existing_cols].copy()
+
+        # 5. CRITICAL: Drop all rows that have any NaN values from the final selection.
+        # Usamos .copy() en el paso anterior para evitar el SettingWithCopyWarning.
+        final_prophet_df.dropna(inplace=True)
+
+        # 6. Check if the dataframe is empty after cleaning and raise a clear error.
+        if final_prophet_df.empty:
+            raise ValueError(
+                "DataFrame became empty after dropping NaNs from indicator calculations. "
+                "This can happen if the input data is too short for the required rolling windows "
+                "(e.g., at least 20 days for 'price_to_ma')."
+            )
+
+        print(f"Prophet preprocessing completed. Final shape: {final_prophet_df.shape}")
+        return final_prophet_df
     
     def get_scalers(self):
         """Prophet handles scaling internally."""
         return None, None
+    
 
-
+    
 class PreprocessorFactory:
     """Factory to create appropriate preprocessors."""
     
