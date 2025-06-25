@@ -19,11 +19,11 @@ services:
     environment:
       RF_SERVICE_URL: http://model-rf-api:8001
       LSTM_SERVICE_URL: http://model-lstm-api:8002
-      #XGBOOST_SERVICE_URL: http://model-xgb-api:8003
+      XGBOOST_SERVICE_URL: http://model-xgb-api:8003
     depends_on:
       - model-rf-api
       - model-lstm-api
-      #- model-xgb-api
+      - model-xgb-api
       #- redis_broker
     networks:
       - stockpredictor-net
@@ -134,6 +134,48 @@ services:
       - stockpredictor-net
 
   # --- XGBoost  ---
+  model-xgb-api:
+    build:
+      context: ./Backend
+      dockerfile: services/model_xgb/Dockerfile
+    container_name: stock_xgb_api
+    command: uvicorn model_xgb.main:app --host 0.0.0. --port 8003 --reload --app-dir /app/services_code
+    expose:
+     - "8003"
+    volumes:
+     - ./Backend/utils:/app/utils
+     - ./Backend/services/model_xgb:/app/services_code/model_xbg
+     - xgb-models:/app/services_code/model_xgb/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_XGB=redis://redis_broker:6379/3
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
+
+  model-xgb-worker:
+    build:
+      context: ./Backend
+      dockerfile: services/model_xgb/Dockerfile
+    container_name: stock_xgb_worker
+    command: celery -A model_xgb.celery_app worker --loglevel=info --queues=xgb_queue
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_xgb:/app/services_code/model_xgb
+      - xgb-models:/app/services_code/model_xgb/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_XGB=redis://redis_broker:6379/3
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+      - CELERY_WORKER_CONCURRENCY=6 # Ajustar según capacidad de procesador de la máquina
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
   
 networks:
   stockpredictor-net:

@@ -15,6 +15,9 @@ from .xgb_model import TimeSeriesXGBoostModel # Usa la versión de xgb_model_py_
 from .train_xgb import train_xgb_model
 from .forecast import forecast_future_prices_xgb
 
+from .celery_app import celery_app
+from celery.result import AsyncResult
+
 try:
     from utils.import_data import load_data
 except ImportError:
@@ -40,6 +43,13 @@ class TrainRequestXGB(BaseModel):
     target_col: str = "Close" 
     train_size_ratio: float = 0.7
     save_model_path_prefix: Optional[str] = None
+
+class TrainingStatusResponse(BaseModel):
+    job_id: str
+    status: str 
+    message: Optional[str] = None
+    progress: Optional[Any] = None 
+    result: Optional[Dict] = None
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -90,6 +100,47 @@ def load_stock_data_helper(ticket: str, start_date: str, end_date: str) -> pd.Da
             raise
         print(f"Error al cargar datos de acciones para {ticket}: {e}")
         raise HTTPException(status_code=500, detail=f"Error descargando o procesando datos para {ticket}: {str(e)}")
+    
+
+def actual_date_range(start_date: Optional[str], end_date: Optional[str], training_period: Optional[str],
+                      default_start: str = "2020-12-10", default_end: Optional[str] = None) -> Tuple[str, str]:
+    
+    if start_date and end_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Las fechas deben estar en formato YYYY-MM-DD.")
+        
+        if start_dt > end_dt:
+            raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha de finalización.")
+        
+        return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+        
+    elif training_period:
+        end_dt = datetime.now()
+        if training_period == "1_year":
+            start_dt = end_dt - timedelta(days=365)
+        elif training_period == "3_years":
+            start_dt = end_dt - timedelta(days=365 * 3)
+        elif training_period == "5_years":
+            start_dt = end_dt - timedelta(days=365 * 5)
+        elif training_period == "10_years":
+            start_dt = end_dt - timedelta(days=365 * 10)
+        else:
+            # Si no hay período válido, usar fechas por defecto
+            start_dt = datetime.strptime(default_start, "%Y-%m-%d")
+            end_dt = datetime.strptime(default_end, "%Y-%m-%d") if default_end else datetime.now()
+    else:
+        # Usar valores por defecto
+        start_dt = datetime.strptime(default_start, "%Y-%m-%d")
+        end_dt = datetime.strptime(default_end, "%Y-%m-%d") if default_end else datetime.now()
+
+    if start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha de finalización.")
+    
+    return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+
 
 @app.get("/", tags=["General"])
 async def read_root_xgb():
@@ -100,6 +151,8 @@ async def read_root_xgb():
 async def train_model_endpoint(request: TrainRequestXGB): # 'request' ahora es el cuerpo JSON
     """
     Trains an XGBoost time series model based on the provided request parameters (sent in JSON body).
+    """
+
     """
     try:
         print(f"Solicitud de entrenamiento XGBoost recibida para el ticker: {request.ticket}")
@@ -157,6 +210,61 @@ async def train_model_endpoint(request: TrainRequestXGB): # 'request' ahora es e
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error entrenando modelo XGBoost: {str(e)}")
 
+    """
+
+    try: 
+        from .tasks import train_xgb_task
+        print(f"Enviando tarea de entrenamiento XGBoost a Celery para el ticker")
+              
+        task = train_xgb_task.delay(request.dict())
+
+        return {"job_id": task.id, "status": "queued", "message": "El entrenamiento ha sido encolado."}
+    
+    except Exception as e:
+        print(f"Error al encolar la tarea de entrenamiento LSTM: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"No se pudo encolar la tarea de entrenamiento LSTM: {str(e)}")
+    
+@app.get("/training_status/{job_id}", response_model=TrainingStatusResponse, tags=["XGBoost Training & Management"])
+async def get_training_status(job_id: str):
+    task_result = AsyncResult(job_id, app=celery_app)
+        
+    status = task_result.status
+    result_data = None
+    progress_info = None
+    message = f"Estado actual del trabajo: {status}"
+
+    if status == 'SUCCESS':
+        result_data = task_result.result
+        message = result_data.get("message", "Entrenamiento completado exitosamente.") if result_data else "Entrenamiento completado."
+        
+    elif status == 'FAILURE':
+        error_info = task_result.result
+        message = f"El entrenamiento falló: {str(error_info)}"
+        
+    elif status == 'PROGRESS':
+        print(f"DEBUG: PROGRESS detectado - info type: {type(task_result.info)}")
+        if isinstance(task_result.info, dict):
+            progress_info = task_result.info.get('progress')
+            current_step = task_result.info.get('current_step', '')
+            message = f"Entrenamiento en progreso: {current_step} ({progress_info}%)"
+        else:
+            print(f"DEBUG: PROGRESS pero info no es dict: {task_result.info}")
+            
+    elif status == 'PENDING':
+        print(f"DEBUG: PENDING - Verificando si realmente está pendiente o no se está ejecutando")
+        
+    else:
+        print(f"DEBUG: Estado desconocido: {status}")
+
+    return TrainingStatusResponse(
+        job_id=job_id,
+        status=status,
+        message=message,
+        progress=progress_info,
+        result=result_data
+    )
 
 @app.get("/predict", tags=["XGBoost Prediction"])
 async def predict_endpoint(
