@@ -81,6 +81,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 import glob
+import json
 
 current_dir = Path(__file__).parent
 project_dir = current_dir.parent.parent  # Navigate up to the project root
@@ -89,6 +90,7 @@ from Backend.services.model_xgb.forecast import forecast_future_prices
 from fastapi import FastAPI, HTTPException, Query
 import pandas as pd
 from pydantic import BaseModel
+from celery.result import AsyncResult
 
 import numpy as np
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -96,6 +98,10 @@ from Backend.services.model_xgb.xgb_model import XGBoostModel  # Import from the
 from Backend.utils.import_data import load_data
 from Backend.utils import feature_engineering, split_data, scale_data
 import traceback
+
+# Import Celery tasks
+from model_xgb.tasks import train_xgb_model_task
+from model_xgb.celery_app import celery_app
 #
 app = FastAPI(
     title="XGBoost Model API",
@@ -257,6 +263,239 @@ def train_model():
             
         return {
             "message": "Model trained and saved successfully.",
+            "evaluation_results": evaluation_results
+        }
+    except Exception as e:
+        traceback_str = traceback.format_exc()
+        print(f"Error during training: {traceback_str}")
+        raise HTTPException(status_code=500, detail=f"Error during model training: {str(e)}")
+
+
+# ============== NEW ASYNC TRAINING ENDPOINTS (CELERY) ==============
+
+@app.post("/train", status_code=202)
+async def train_model_async(request: TrainRequest):
+    """
+    Endpoint asíncrono para entrenar el modelo XGBoost.
+    
+    Envía la tarea a Celery y devuelve un task_id para consultar el estado.
+    Este es el método recomendado para entrenamiento en producción.
+    
+    Returns:
+        - task_id: ID de la tarea para consultar estado
+        - status: "queued"
+    """
+    try:
+        # Cargar datos
+        data = load_stock_data(
+            request.ticket, 
+            request.start_date, 
+            request.end_date
+        )
+        
+        if data.empty:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No data found for ticker {request.ticket}"
+            )
+        
+        # Limitar tamaño del payload para Celery
+        MAX_ROWS = 5000
+        if len(data) > MAX_ROWS:
+            data = data.tail(MAX_ROWS)
+            print(f"Warning: Data truncated to last {MAX_ROWS} rows")
+        
+        # Preparar datos para serialización
+        historical_data = data.values.tolist()
+        data_columns = data.columns.tolist()
+        data_index = data.index.strftime('%Y-%m-%d').tolist()
+        
+        # Definir ruta del modelo
+        save_path = request.save_model_path or get_default_model_path(request.ticket)
+        
+        # Parámetros del modelo
+        model_params = {
+            'n_lags': request.n_lags,
+            'target_col': request.target_col,
+            'train_size': request.train_size,
+            'optimize_hyperparameters': True
+        }
+        
+        # Importar tarea aquí para evitar problemas de importación circular
+        from model_xgb.tasks import train_xgb_model_task
+        
+        # Enviar tarea a Celery
+        task = train_xgb_model_task.delay(
+            ticker=request.ticket,
+            historical_data=historical_data,
+            data_columns=data_columns,
+            data_index=data_index,
+            model_params=model_params,
+            save_model_path=save_path
+        )
+        
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "message": f"Training task for {request.ticket} has been queued",
+            "ticker": request.ticket,
+            "data_points": len(data)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback_str = traceback.format_exc()
+        print(f"Error queuing training task: {traceback_str}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error queuing training task: {str(e)}"
+        )
+
+
+@app.get("/train/status/{task_id}")
+async def get_train_status(task_id: str):
+    """
+    Consulta el estado de una tarea de entrenamiento.
+    
+    Args:
+        task_id: ID de la tarea de Celery
+        
+    Returns:
+        - state: Estado actual (PENDING, PROGRESS, SUCCESS, FAILURE)
+        - progress: Porcentaje de progreso (si disponible)
+        - result: Resultado final (si completada)
+    """
+    from celery.result import AsyncResult
+    from model_xgb.celery_app import celery_app
+    
+    result = AsyncResult(task_id, app=celery_app)
+    
+    response = {
+        "task_id": task_id,
+        "state": result.state
+    }
+    
+    if result.state == 'PENDING':
+        response.update({
+            "progress": 0,
+            "message": "Task is pending or unknown"
+        })
+    elif result.state == 'PROGRESS':
+        info = result.info or {}
+        response.update({
+            "progress": info.get('progress', 0),
+            "stage": info.get('stage', 'unknown'),
+            "message": info.get('message', ''),
+            "ticker": info.get('ticker', '')
+        })
+    elif result.state == 'SUCCESS':
+        response.update({
+            "progress": 100,
+            "result": result.result
+        })
+    elif result.state == 'FAILURE':
+        response.update({
+            "progress": 0,
+            "error": str(result.info) if result.info else "Unknown error"
+        })
+    
+    return response
+
+
+@app.get("/train/tasks")
+async def list_active_tasks():
+    """
+    Lista las tareas de entrenamiento activas.
+    """
+    from model_xgb.celery_app import celery_app
+    
+    try:
+        inspect = celery_app.control.inspect()
+        
+        active = inspect.active() or {}
+        reserved = inspect.reserved() or {}
+        scheduled = inspect.scheduled() or {}
+        
+        return {
+            "active_tasks": active,
+            "reserved_tasks": reserved,
+            "scheduled_tasks": scheduled
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Could not retrieve task information. Is Celery running?"
+        }
+
+
+@app.delete("/train/cancel/{task_id}")
+async def cancel_training(task_id: str):
+    """
+    Cancela una tarea de entrenamiento en progreso.
+    """
+    from celery.result import AsyncResult
+    from model_xgb.celery_app import celery_app
+    
+    result = AsyncResult(task_id, app=celery_app)
+    
+    if result.state in ['PENDING', 'PROGRESS']:
+        result.revoke(terminate=True)
+        return {
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "Training task has been cancelled"
+        }
+    else:
+        return {
+            "task_id": task_id,
+            "status": result.state,
+            "message": f"Task cannot be cancelled. Current state: {result.state}"
+        }
+
+
+# ============== LEGACY SYNC ENDPOINT (for backward compatibility) ==============
+
+@app.get("/train/sync") 
+def train_model_sync():
+    """
+    Endpoint SÍNCRONO para entrenar el modelo (LEGACY - usar POST /train en producción).
+    Mantiene compatibilidad con versiones anteriores.
+    """
+    global model, feature_scaler, target_scaler
+    try:
+        print("Manual model training started (sync).")
+        data = load_data()
+        print("Data loaded successfully. Shape:", data.shape)
+
+        processed_data = feature_engineering(data)
+        print("Feature engineering completed. Shape:", processed_data.shape)
+
+        X_train, X_test, y_train, y_test = split_data(processed_data, train_size=0.8)
+        print("Data split completed. Training data shape:", X_train.shape)
+        
+        X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, feature_scaler, target_scaler = scale_data(
+            X_train, X_test, 
+            y_train.values.reshape(-1, 1), 
+            y_test.values.reshape(-1, 1)
+        )
+        print("Data scaling completed.")
+
+        model = XGBoostModel()
+        model.fit(X_train_scaled, y_train_scaled)
+        print("Model training completed.")
+
+        model.feature_scaler = feature_scaler
+        model.target_scaler = target_scaler
+        
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        model_file_path = os.path.join(MODEL_DIR, "xgb_model.joblib")
+        model.save(model_file_path)
+        
+        evaluation_results = model.evaluate(X_test_scaled, y_test_scaled)
+        
+        return {
+            "message": "Model trained and saved successfully (sync).",
             "evaluation_results": evaluation_results
         }
     except Exception as e:

@@ -11,6 +11,8 @@ import ModelComparisonTable from './components/ModelComparisonTable';
 import ModelDetailsDisplay from './components/ModelDetailsDisplay';
 import HelpModal from './components/HelpModal';
 import ActiveTrainingJobs from './components/ActiveTrainingJobs';
+import ShapExplainer from './components/ShapExplainer';
+import EnsemblePredictor from './components/EnsemblePredictor';
 import { useTrainModelMutation, useGenerateForecastMutation, useTrainingStatusMutation } from './hooks/useApiMutations'; // Ajusta el path
 import { getAvailableModels } from './services/api';
 import { parseMetadata } from './utils/pythonUtils'; // Import the metadata parsing utility
@@ -895,6 +897,32 @@ function App() {
                 />
             ),
             disabled: !residualsData || residualsData.values.length === 0
+        },
+        {
+            key: '6',
+            label: '🔬 Interpretabilidad SHAP',
+            children: (
+                <ShapExplainer 
+                    ticker={config.selectedTicker}
+                    onError={(err) => message.error(`Error SHAP: ${err.message}`)}
+                />
+            ),
+            disabled: false // SHAP siempre disponible para XGBoost y RF
+        },
+        {
+            key: '7',
+            label: '🎯 Predicción Ensemble',
+            children: (
+                <EnsemblePredictor 
+                    ticker={config.selectedTicker}
+                    onPrediction={(result) => {
+                        message.success(`Predicción ensemble generada para ${config.selectedTicker}`);
+                        console.log('Ensemble prediction result:', result);
+                    }}
+                    onError={(err) => message.error(`Error Ensemble: ${err.message}`)}
+                />
+            ),
+            disabled: false // Ensemble siempre disponible
         }
     ];
 

@@ -342,3 +342,228 @@ export const getAvailableModels = async (modelType) => {
     }
 };
 
+
+// ============== SHAP EXPLAINER API ==============
+
+/**
+ * Get SHAP explanations for model predictions
+ * @param {string} ticker - Stock ticker symbol
+ * @param {string} modelType - Model type: 'xgboost' or 'rf'
+ * @param {number} topFeatures - Number of top features to return
+ */
+export const getShapExplanation = async (ticker, modelType = 'xgboost', topFeatures = 10) => {
+    const url = `${API_GATEWAY_URL}/explain`;
+    
+    try {
+        console.log(`Requesting SHAP explanation for ${ticker} using ${modelType}`);
+        
+        const response = await axios.post(url, {
+            ticker: ticker,
+            model_type: modelType,
+            top_features: topFeatures
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 60000
+        });
+        
+        console.log('SHAP explanation received:', response.data);
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error getting SHAP explanation:', error);
+        throw handleApiError(error, 'SHAP explanation');
+    }
+};
+
+/**
+ * Get global feature importance using SHAP values
+ * @param {string} modelType - Model type: 'xgboost' or 'rf'
+ * @param {string} ticker - Stock ticker symbol
+ * @param {number} maxSamples - Maximum samples for calculation
+ */
+export const getGlobalImportance = async (modelType, ticker = 'NU', maxSamples = 500) => {
+    const url = `${API_GATEWAY_URL}/explain/importance/${modelType}`;
+    
+    try {
+        console.log(`Requesting global importance for ${modelType}`);
+        
+        const response = await axios.get(url, {
+            params: { ticker, max_samples: maxSamples },
+            timeout: 90000
+        });
+        
+        console.log('Global importance received:', response.data);
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error getting global importance:', error);
+        throw handleApiError(error, 'global importance');
+    }
+};
+
+/**
+ * Get SHAP summary plot as base64 image
+ * @param {string} modelType - Model type: 'xgboost' or 'rf'
+ * @param {string} ticker - Stock ticker symbol
+ * @param {string} plotType - 'bar' or 'dot'
+ * @param {number} maxFeatures - Maximum features to display
+ */
+export const getShapPlot = async (modelType, ticker = 'NU', plotType = 'bar', maxFeatures = 15) => {
+    const url = `${API_GATEWAY_URL}/explain/plot/${modelType}`;
+    
+    try {
+        console.log(`Requesting SHAP plot for ${modelType}`);
+        
+        const response = await axios.get(url, {
+            params: { ticker, plot_type: plotType, max_features: maxFeatures },
+            timeout: 90000
+        });
+        
+        console.log('SHAP plot received');
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error getting SHAP plot:', error);
+        throw handleApiError(error, 'SHAP plot');
+    }
+};
+
+/**
+ * Get SHAP waterfall plot for a single prediction
+ * @param {string} modelType - Model type: 'xgboost' or 'rf'
+ * @param {string} ticker - Stock ticker symbol
+ * @param {number} predictionIndex - Index of prediction to explain
+ * @param {number} maxFeatures - Maximum features to display
+ */
+export const getWaterfallPlot = async (modelType, ticker = 'NU', predictionIndex = 0, maxFeatures = 10) => {
+    const url = `${API_GATEWAY_URL}/explain/waterfall/${modelType}`;
+    
+    try {
+        console.log(`Requesting waterfall plot for ${modelType}, prediction ${predictionIndex}`);
+        
+        const response = await axios.get(url, {
+            params: { ticker, prediction_index: predictionIndex, max_features: maxFeatures },
+            timeout: 90000
+        });
+        
+        console.log('Waterfall plot received');
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error getting waterfall plot:', error);
+        throw handleApiError(error, 'waterfall plot');
+    }
+};
+
+
+// ============== ENSEMBLE MODEL API ==============
+
+/**
+ * Get ensemble prediction combining multiple models
+ * @param {Object} config - Prediction configuration
+ * @param {string} config.ticker - Stock ticker symbol
+ * @param {number} config.forecastHorizon - Number of days to forecast
+ * @param {string} config.targetCol - Target column (default: 'Close')
+ * @param {Array<string>} config.models - Models to use (null = all)
+ * @param {string} config.ensembleMethod - Ensemble method
+ */
+export const getEnsemblePrediction = async (config) => {
+    const {
+        ticker = 'NU',
+        forecastHorizon = 10,
+        targetCol = 'Close',
+        models = null,
+        ensembleMethod = 'weighted_average'
+    } = config;
+    
+    const url = `${API_GATEWAY_URL}/ensemble/predict`;
+    
+    try {
+        console.log(`Requesting ensemble prediction for ${ticker}`);
+        
+        const response = await axios.post(url, {
+            ticker: ticker,
+            forecast_horizon: forecastHorizon,
+            target_col: targetCol,
+            models: models,
+            ensemble_method: ensembleMethod
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 120000 // 2 minutes timeout for ensemble
+        });
+        
+        console.log('Ensemble prediction received:', response.data);
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error getting ensemble prediction:', error);
+        throw handleApiError(error, 'ensemble prediction');
+    }
+};
+
+/**
+ * Compare predictions from all models
+ * @param {string} ticker - Stock ticker symbol
+ * @param {number} forecastHorizon - Number of days to forecast
+ * @param {string} targetCol - Target column
+ */
+export const compareModelPredictions = async (ticker = 'NU', forecastHorizon = 10, targetCol = 'Close') => {
+    const url = `${API_GATEWAY_URL}/ensemble/compare`;
+    
+    try {
+        console.log(`Comparing model predictions for ${ticker}`);
+        
+        const response = await axios.get(url, {
+            params: { ticker, forecast_horizon: forecastHorizon, target_col: targetCol },
+            timeout: 120000
+        });
+        
+        console.log('Model comparison received:', response.data);
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error comparing models:', error);
+        throw handleApiError(error, 'model comparison');
+    }
+};
+
+/**
+ * Get available ensemble models and their status
+ */
+export const getEnsembleModels = async () => {
+    const url = `${API_GATEWAY_URL}/ensemble/models`;
+    
+    try {
+        const response = await axios.get(url, { timeout: 30000 });
+        console.log('Ensemble models received:', response.data);
+        return response.data;
+        
+    } catch (error) {
+        console.error('Error getting ensemble models:', error);
+        throw handleApiError(error, 'ensemble models');
+    }
+};
+
+
+// ============== HELPER FUNCTIONS ==============
+
+/**
+ * Handle API errors consistently
+ */
+const handleApiError = (error, operationName) => {
+    if (error.response) {
+        const errorMessage = error.response.data?.detail || 
+                            error.response.data?.message || 
+                            `Error ${error.response.status}: ${error.response.statusText}`;
+        const enhancedError = new Error(`Error en ${operationName}: ${errorMessage}`);
+        enhancedError.status = error.response.status;
+        enhancedError.data = error.response.data;
+        return enhancedError;
+    } else if (error.request) {
+        const noResponseError = new Error(`No se recibió respuesta del servidor para ${operationName}. Verifica que el servicio esté corriendo.`);
+        noResponseError.isNetworkError = true;
+        return noResponseError;
+    } else {
+        return new Error(`Error en ${operationName}: ${error.message}`);
+    }
+};

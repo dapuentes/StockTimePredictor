@@ -3,6 +3,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 import glob
+import json
 #current_dir = Path(__file__).parent
 #project_dir = current_dir.parent.parent  # Navigate up to the project root
 #sys.path.append(str(project_dir))
@@ -170,6 +171,232 @@ def train_model():
             "evaluation_results": metrics
         }
 
+
+    except Exception as e:
+        print("Error during training:", str(e))
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error during training: {str(e)}")
+
+
+# ============== NEW ASYNC TRAINING ENDPOINTS (CELERY) ==============
+
+@app.post("/train", status_code=202)
+async def train_model_async(request: TrainRequest):
+    """
+    Endpoint asíncrono para entrenar el modelo Prophet.
+    
+    Envía la tarea a Celery y devuelve un task_id para consultar el estado.
+    Este es el método recomendado para entrenamiento en producción.
+    
+    Returns:
+        - task_id: ID de la tarea para consultar estado
+        - status: "queued"
+    """
+    import pandas as pd
+    try:
+        # Cargar datos
+        data = load_stock_data(
+            request.ticker, 
+            request.start_date, 
+            request.end_date
+        )
+        
+        if data.empty:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No data found for ticker {request.ticker}"
+            )
+        
+        # Limitar tamaño del payload para Celery
+        MAX_ROWS = 5000
+        if len(data) > MAX_ROWS:
+            data = data.tail(MAX_ROWS)
+            print(f"Warning: Data truncated to last {MAX_ROWS} rows")
+        
+        # Preparar datos para serialización
+        historical_data = data.values.tolist()
+        data_columns = data.columns.tolist()
+        data_index = data.index.strftime('%Y-%m-%d').tolist()
+        
+        # Definir ruta del modelo
+        save_path = request.save_model_path or get_default_model_path(request.ticker)
+        
+        # Parámetros del modelo
+        model_params = {
+            'target_col': request.target_col,
+            'train_size': request.train_size,
+            'regressor_cols': request.regressor_cols,
+            'optimize_hyperparameters': False  # Prophet optimization is slow
+        }
+        
+        # Importar tarea aquí para evitar problemas de importación circular
+        from model_prophet.tasks import train_prophet_model_task
+        
+        # Enviar tarea a Celery
+        task = train_prophet_model_task.delay(
+            ticker=request.ticker,
+            historical_data=historical_data,
+            data_columns=data_columns,
+            data_index=data_index,
+            model_params=model_params,
+            save_model_path=save_path
+        )
+        
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "message": f"Training task for {request.ticker} has been queued",
+            "ticker": request.ticker,
+            "data_points": len(data)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback_str = traceback.format_exc()
+        print(f"Error queuing training task: {traceback_str}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error queuing training task: {str(e)}"
+        )
+
+
+@app.get("/train/status/{task_id}")
+async def get_train_status(task_id: str):
+    """
+    Consulta el estado de una tarea de entrenamiento.
+    
+    Args:
+        task_id: ID de la tarea de Celery
+        
+    Returns:
+        - state: Estado actual (PENDING, PROGRESS, SUCCESS, FAILURE)
+        - progress: Porcentaje de progreso (si disponible)
+        - result: Resultado final (si completada)
+    """
+    from celery.result import AsyncResult
+    from model_prophet.celery_app import celery_app
+    
+    result = AsyncResult(task_id, app=celery_app)
+    
+    response = {
+        "task_id": task_id,
+        "state": result.state
+    }
+    
+    if result.state == 'PENDING':
+        response.update({
+            "progress": 0,
+            "message": "Task is pending or unknown"
+        })
+    elif result.state == 'PROGRESS':
+        info = result.info or {}
+        response.update({
+            "progress": info.get('progress', 0),
+            "stage": info.get('stage', 'unknown'),
+            "message": info.get('message', ''),
+            "ticker": info.get('ticker', '')
+        })
+    elif result.state == 'SUCCESS':
+        response.update({
+            "progress": 100,
+            "result": result.result
+        })
+    elif result.state == 'FAILURE':
+        response.update({
+            "progress": 0,
+            "error": str(result.info) if result.info else "Unknown error"
+        })
+    
+    return response
+
+
+@app.get("/train/tasks")
+async def list_active_tasks():
+    """
+    Lista las tareas de entrenamiento activas.
+    """
+    from model_prophet.celery_app import celery_app
+    
+    try:
+        inspect = celery_app.control.inspect()
+        
+        active = inspect.active() or {}
+        reserved = inspect.reserved() or {}
+        scheduled = inspect.scheduled() or {}
+        
+        return {
+            "active_tasks": active,
+            "reserved_tasks": reserved,
+            "scheduled_tasks": scheduled
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Could not retrieve task information. Is Celery running?"
+        }
+
+
+@app.delete("/train/cancel/{task_id}")
+async def cancel_training(task_id: str):
+    """
+    Cancela una tarea de entrenamiento en progreso.
+    """
+    from celery.result import AsyncResult
+    from model_prophet.celery_app import celery_app
+    
+    result = AsyncResult(task_id, app=celery_app)
+    
+    if result.state in ['PENDING', 'PROGRESS']:
+        result.revoke(terminate=True)
+        return {
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "Training task has been cancelled"
+        }
+    else:
+        return {
+            "task_id": task_id,
+            "status": result.state,
+            "message": f"Task cannot be cancelled. Current state: {result.state}"
+        }
+
+
+# ============== LEGACY SYNC ENDPOINT (for backward compatibility) ==============
+
+@app.get('/train/sync')
+def train_model_sync():
+    '''
+    Endpoint SÍNCRONO para entrenar el modelo Prophet (LEGACY - usar POST /train en producción).
+    '''
+    global model, feature_scaler, target_scaler
+    try:
+        model = ProphetModel()
+        print('Manual training of the model started (sync)')
+        data = load_data()
+        if data.empty:
+            raise HTTPException(status_code=404, detail="No data found for the given ticket and date range.")
+
+        model, metrics, _ = prophet_service.train(
+            data=data,
+            target_col='Close',
+            regressor_cols=['Open','High','Low','Volume'],
+            train_size=0.8,
+            optimize_hyperparams=True,
+            save_model_path=os.path.join(MODEL_DIR, "model_prophet.joblib"),
+            plot_results=False,
+            forecast_horizon=None
+        )
+
+        print("Model training completed.")
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        model_file_path = os.path.join(MODEL_DIR, "model_prophet.joblib")
+        model.save(model_file_path)
+
+        return {
+            "message": "Modelo Prophet entrenado y guardado exitosamente (sync).",
+            "evaluation_results": metrics
+        }
 
     except Exception as e:
         print("Error during training:", str(e))

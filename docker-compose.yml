@@ -19,12 +19,17 @@ services:
     environment:
       RF_SERVICE_URL: http://model-rf-api:8001
       LSTM_SERVICE_URL: http://model-lstm-api:8002
-      #XGBOOST_SERVICE_URL: http://model-xgb-api:8003
+      XGB_SERVICE_URL: http://model-xgb-api:8003
+      PROPHET_SERVICE_URL: http://model-prophet-api:8004
+      SHAP_SERVICE_URL: http://shap-explainer-api:8005
+      ENSEMBLE_SERVICE_URL: http://ensemble-model-api:8006
     depends_on:
       - model-rf-api
       - model-lstm-api
-      #- model-xgb-api
-      #- redis_broker
+      - model-xgb-api
+      - model-prophet-api
+      - shap-explainer-api
+      - ensemble-model-api
     networks:
       - stockpredictor-net
 
@@ -134,6 +139,144 @@ services:
       - stockpredictor-net
 
   # --- XGBoost  ---
+  model-xgb-api:
+    build:
+      context: ./Backend
+      dockerfile: services/model_xgb/Dockerfile
+    container_name: stock_xgb_api
+    command: uvicorn model_xgb.main_xgb:app --host 0.0.0.0 --port 8003 --reload --app-dir /app/services_code
+    expose:
+      - "8003"
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_xgb:/app/services_code/model_xgb
+      - xgb-models:/app/services_code/model_xgb/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_XGB=redis://redis_broker:6379/3
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
+
+  model-xgb-worker:
+    build:
+      context: ./Backend
+      dockerfile: services/model_xgb/Dockerfile
+    container_name: stock_xgb_worker
+    command: celery -A model_xgb.celery_app worker --loglevel=info --queues=xgb_queue
+    working_dir: /app/services_code
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_xgb:/app/services_code/model_xgb
+      - xgb-models:/app/services_code/model_xgb/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_XGB=redis://redis_broker:6379/3
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+      - CELERY_WORKER_CONCURRENCY=4
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
+
+  # --- Prophet ---
+  model-prophet-api:
+    build:
+      context: ./Backend
+      dockerfile: services/model_prophet/Dockerfile
+    container_name: stock_prophet_api
+    command: uvicorn model_prophet.app:app --host 0.0.0.0 --port 8004 --reload --app-dir /app/services_code
+    expose:
+      - "8004"
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_prophet:/app/services_code/model_prophet
+      - ./Backend/services/model_xgb:/app/services_code/services/model_xgb
+      - prophet-models:/app/services_code/model_prophet/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_PROPHET=redis://redis_broker:6379/4
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
+
+  model-prophet-worker:
+    build:
+      context: ./Backend
+      dockerfile: services/model_prophet/Dockerfile
+    container_name: stock_prophet_worker
+    command: celery -A model_prophet.celery_app worker --loglevel=info --queues=prophet_queue
+    working_dir: /app/services_code
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/model_prophet:/app/services_code/model_prophet
+      - ./Backend/services/model_xgb:/app/services_code/services/model_xgb
+      - prophet-models:/app/services_code/model_prophet/models
+    environment:
+      - CELERY_BROKER_URL=redis://redis_broker:6379/0
+      - CELERY_RESULT_BACKEND_URL_PROPHET=redis://redis_broker:6379/4
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+      - CELERY_WORKER_CONCURRENCY=2
+    depends_on:
+      - redis_broker
+    networks:
+      - stockpredictor-net
+
+  # --- SHAP Explainer Service ---
+  shap-explainer-api:
+    build:
+      context: ./Backend
+      dockerfile: services/shap_explainer/Dockerfile
+    container_name: stock_shap_api
+    command: uvicorn shap_explainer.app:app --host 0.0.0.0 --port 8005 --reload --app-dir /app/services_code
+    expose:
+      - "8005"
+    volumes:
+      - ./Backend/utils:/app/utils
+      - ./Backend/services/shap_explainer:/app/services_code/shap_explainer
+      - ./Backend/services/model_xgb:/app/services_code/model_xgb
+      - ./Backend/services/model_rf:/app/services_code/model_rf
+      - xgb-models:/app/services_code/model_xgb/models
+      - rf-models:/app/services_code/model_rf/models
+    environment:
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+    networks:
+      - stockpredictor-net
+
+  # --- Ensemble Model Service ---
+  ensemble-model-api:
+    build:
+      context: ./Backend
+      dockerfile: services/model_ensemble/Dockerfile
+    container_name: stock_ensemble_api
+    command: uvicorn model_ensemble.app:app --host 0.0.0.0 --port 8006 --reload --app-dir /app/services_code
+    expose:
+      - "8006"
+    volumes:
+      - ./Backend/services/model_ensemble:/app/services_code/model_ensemble
+    environment:
+      - RF_SERVICE_URL=http://model-rf-api:8001
+      - LSTM_SERVICE_URL=http://model-lstm-api:8002
+      - XGB_SERVICE_URL=http://model-xgb-api:8003
+      - PROPHET_SERVICE_URL=http://model-prophet-api:8004
+      - TZ=America/Bogota
+      - PYTHONPATH=/app:/app/services_code
+    depends_on:
+      - model-rf-api
+      - model-lstm-api
+      - model-xgb-api
+      - model-prophet-api
+    networks:
+      - stockpredictor-net
   
 networks:
   stockpredictor-net:
@@ -142,5 +285,6 @@ networks:
 volumes:
   rf-models:
   lstm-models:
-  #xgb-models:
+  xgb-models:
+  prophet-models:
   redis-data:

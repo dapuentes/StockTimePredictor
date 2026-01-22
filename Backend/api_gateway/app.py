@@ -1,6 +1,6 @@
 import os
 import httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import FastAPI, HTTPException, Query, Path, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +25,10 @@ app.add_middleware(
 microservices = {
     "rf": os.getenv("RF_SERVICE_URL", "http://localhost:8001"),  # Microservicio de Random Forest
     "lstm": os.getenv("LSTM_SERVICE_URL", "http://localhost:8002"),  # Microservicio de LSTM
-    "xgboost": os.getenv("XGBOOST_SERVICE_URL", "http://localhost:8003"),  # Microservicio de XGBoost
+    "xgboost": os.getenv("XGB_SERVICE_URL", "http://localhost:8003"),  # Microservicio de XGBoost
     "prophet": os.getenv("PROPHET_SERVICE_URL", "http://localhost:8004"),  # Microservicio de Prophet
+    "shap": os.getenv("SHAP_SERVICE_URL", "http://localhost:8005"),  # Microservicio de SHAP Explainer
+    "ensemble": os.getenv("ENSEMBLE_SERVICE_URL", "http://localhost:8006"),  # Microservicio de Ensemble
 }
 
 
@@ -269,6 +271,238 @@ async def list_models(
             import traceback
             traceback.print_exc()
             raise HTTPException(status_code=500, detail="Error interno del Gateway listando modelos.")
+
+
+# ============== SHAP EXPLAINER ENDPOINTS ==============
+
+class ExplainRequest(BaseModel):
+    """Request model for SHAP explanation."""
+    ticker: str = "NU"
+    model_type: str = "xgboost"  # "xgboost" or "rf"
+    top_features: int = 10
+
+
+@app.post("/explain")
+async def explain_prediction(request: ExplainRequest):
+    """
+    Get SHAP explanations for model predictions.
+    
+    Returns feature contributions showing why the model made its prediction.
+    """
+    service_url = f"{microservices['shap']}/explain"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                service_url, 
+                json=request.model_dump(),
+                timeout=60.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout getting SHAP explanations")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"SHAP service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to SHAP explainer service")
+
+
+@app.get("/explain/importance/{model_type}")
+async def get_feature_importance(
+    model_type: str = Path(..., description="Model type: xgboost or rf"),
+    ticker: str = Query("NU", description="Stock ticker"),
+    max_samples: int = Query(500, description="Maximum samples for calculation")
+):
+    """
+    Get global feature importance using SHAP values.
+    
+    Shows which features are most important for the model's predictions overall.
+    """
+    service_url = f"{microservices['shap']}/global-importance"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                service_url,
+                json={
+                    "ticker": ticker,
+                    "model_type": model_type,
+                    "max_samples": max_samples
+                },
+                timeout=90.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout calculating feature importance")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"SHAP service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to SHAP explainer service")
+
+
+@app.get("/explain/plot/{model_type}")
+async def get_shap_plot(
+    model_type: str = Path(..., description="Model type: xgboost or rf"),
+    ticker: str = Query("NU", description="Stock ticker"),
+    plot_type: str = Query("bar", description="Plot type: bar or dot"),
+    max_features: int = Query(15, description="Maximum features to display")
+):
+    """
+    Get SHAP summary plot as base64 image.
+    
+    Visual representation of feature importance and impact direction.
+    """
+    service_url = f"{microservices['shap']}/summary-plot"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                service_url,
+                params={
+                    "ticker": ticker,
+                    "model_type": model_type,
+                    "plot_type": plot_type,
+                    "max_features": max_features
+                },
+                timeout=90.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout generating SHAP plot")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"SHAP service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to SHAP explainer service")
+
+
+@app.get("/explain/waterfall/{model_type}")
+async def get_waterfall_plot(
+    model_type: str = Path(..., description="Model type: xgboost or rf"),
+    ticker: str = Query("NU", description="Stock ticker"),
+    prediction_index: int = Query(0, description="Index of prediction to explain"),
+    max_features: int = Query(10, description="Maximum features to display")
+):
+    """
+    Get SHAP waterfall plot for a single prediction.
+    
+    Shows how each feature contributes to the final prediction value.
+    """
+    service_url = f"{microservices['shap']}/waterfall-plot"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                service_url,
+                params={
+                    "ticker": ticker,
+                    "model_type": model_type,
+                    "prediction_index": prediction_index,
+                    "max_features": max_features
+                },
+                timeout=90.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout generating waterfall plot")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"SHAP service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to SHAP explainer service")
+
+
+# ============== ENSEMBLE MODEL ENDPOINTS ==============
+
+class EnsemblePredictRequest(BaseModel):
+    """Request model for ensemble prediction."""
+    ticker: str = "NU"
+    forecast_horizon: int = 10
+    target_col: str = "Close"
+    models: Optional[List[str]] = None
+    ensemble_method: str = "weighted_average"
+
+
+@app.post("/ensemble/predict")
+async def ensemble_predict(request: EnsemblePredictRequest):
+    """
+    Get ensemble prediction combining multiple models.
+    
+    Combines predictions from RF, LSTM, XGBoost, and Prophet for improved accuracy.
+    """
+    service_url = f"{microservices['ensemble']}/predict"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                service_url,
+                json=request.model_dump(),
+                timeout=120.0  # Longer timeout as it calls multiple services
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout getting ensemble prediction")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"Ensemble service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to ensemble service")
+
+
+@app.get("/ensemble/compare")
+async def compare_model_predictions(
+    ticker: str = Query("NU", description="Stock ticker"),
+    forecast_horizon: int = Query(10, description="Forecast horizon in days"),
+    target_col: str = Query("Close", description="Target column")
+):
+    """
+    Compare predictions from all available models.
+    
+    Useful for understanding model agreement and selecting the best model.
+    """
+    service_url = f"{microservices['ensemble']}/predict/compare"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                service_url,
+                params={
+                    "ticker": ticker,
+                    "forecast_horizon": forecast_horizon,
+                    "target_col": target_col
+                },
+                timeout=120.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout comparing predictions")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"Ensemble service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to ensemble service")
+
+
+@app.get("/ensemble/models")
+async def list_ensemble_models():
+    """
+    List available models for ensemble and their status.
+    """
+    service_url = f"{microservices['ensemble']}/models"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(service_url, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Gateway timeout listing models")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=exc.response.status_code, detail=f"Ensemble service error: {exc.response.text}")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Cannot connect to ensemble service")
 
 
 @app.get("/health")

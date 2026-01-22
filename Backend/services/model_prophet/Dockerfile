@@ -1,16 +1,15 @@
-FROM python:3.9-slim
+FROM python:3.10-slim-bullseye
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
+COPY utils /app/utils
+COPY services/model_prophet/requirements.txt ./requirements.txt
 
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-COPY backend/utils/ /app/utils/
-
-COPY backend/services/model_prophet/ /app/services/model_prophet/
-
-RUN pip install --no-cache-dir -r /app/services/model_prophet/requirements.txt
-
-RUN mkdir -p /app/services/model_prophet/models
+COPY . .
 
 EXPOSE 8004
-
-CMD ["uvicorn", "services.model_prophet.app:app", "--host", "0.0.0.0", "--port", "8004"]
