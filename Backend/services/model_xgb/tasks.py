@@ -6,9 +6,35 @@ import pandas as pd
 from datetime import datetime
 import os
 import traceback
+import sys
 
-from model_xgb.celery_app import celery_app
-from model_xgb.xgb_model import XGBoostModel
+# Asegurar paths correctos para Docker
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/app/utils')
+sys.path.insert(0, '/app/services_code')
+
+from .celery_app import celery_app
+from .xgb_model import XGBoostModel
+
+# Importar utilidades desde el path correcto en Docker
+try:
+    # Primero intentar desde utils (Docker path)
+    from utils import scale_data, split_data, feature_engineering, add_lags
+except ImportError:
+    try:
+        # Fallback - imports desde utils.preprocessing
+        from utils.preprocessing import (
+            split_data_universal as split_data,
+            scale_data_universal as scale_data
+        )
+        from utils import feature_engineering, add_lags
+    except ImportError:
+        try:
+            # Fallback para desarrollo local con Backend prefix
+            from Backend.utils import scale_data, split_data, feature_engineering, add_lags
+        except ImportError:
+            print("WARNING: Could not import preprocessing utils. Training may fail.")
+            scale_data = split_data = feature_engineering = add_lags = None
 
 
 @celery_app.task(
@@ -16,7 +42,8 @@ from model_xgb.xgb_model import XGBoostModel
     name="train_xgb_model_task",
     max_retries=2,
     soft_time_limit=3600,  # 1 hora máximo
-    time_limit=3660
+    time_limit=3660,
+    queue="xgb_queue"
 )
 def train_xgb_model_task(
     self,
@@ -94,10 +121,9 @@ def train_xgb_model_task(
             }
         )
         
-        # Importar utilidades
-        import sys
-        sys.path.insert(0, '/app')
-        from Backend.utils import scale_data, split_data, feature_engineering, add_lags
+        # Verificar que las utilidades están disponibles
+        if add_lags is None or split_data is None or scale_data is None:
+            raise ImportError("No se pudieron importar las utilidades de preprocessing")
         
         # Preparar datos con lags
         df_with_lags = add_lags(df, target_col=target_col, n_lags=n_lags)

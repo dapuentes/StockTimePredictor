@@ -99,9 +99,14 @@ from Backend.utils.import_data import load_data
 from Backend.utils import feature_engineering, split_data, scale_data
 import traceback
 
-# Import Celery tasks
-from model_xgb.tasks import train_xgb_model_task
-from model_xgb.celery_app import celery_app
+# Import Celery tasks - usar imports relativos
+try:
+    from .tasks import train_xgb_model_task
+    from .celery_app import celery_app
+except ImportError:
+    # Fallback para ejecución directa
+    from model_xgb.tasks import train_xgb_model_task
+    from model_xgb.celery_app import celery_app
 #
 app = FastAPI(
     title="XGBoost Model API",

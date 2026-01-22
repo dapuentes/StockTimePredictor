@@ -6,9 +6,15 @@ import pandas as pd
 from datetime import datetime
 import os
 import traceback
+import sys
 
-from model_prophet.celery_app import celery_app
-from model_prophet.prophet_model import ProphetModel
+# Asegurar paths correctos para Docker
+sys.path.insert(0, '/app')
+sys.path.insert(0, '/app/utils')
+sys.path.insert(0, '/app/services_code')
+
+from .celery_app import celery_app
+from .prophet_model import ProphetModel
 
 
 @celery_app.task(
@@ -16,7 +22,8 @@ from model_prophet.prophet_model import ProphetModel
     name="train_prophet_model_task",
     max_retries=2,
     soft_time_limit=3600,  # 1 hora máximo
-    time_limit=3660
+    time_limit=3660,
+    queue="prophet_queue"
 )
 def train_prophet_model_task(
     self,

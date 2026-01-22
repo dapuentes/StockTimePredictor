@@ -6,13 +6,14 @@ from celery import Celery
 import os
 
 # Redis URLs for broker and result backend
-REDIS_URL = os.getenv("CELERY_BROKER_URL")
-RESULT_BACKEND_URL = os.getenv("CELERY_RESULT_BACKEND_URL_PROPHET")
+REDIS_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+RESULT_BACKEND_URL = os.getenv("CELERY_RESULT_BACKEND_URL_PROPHET", "redis://localhost:6379/4")
 
+# No levantar error si estamos en desarrollo local sin Redis
 if not REDIS_URL:
-    raise RuntimeError("CELERY_BROKER_URL no está definida en el entorno.")
+    REDIS_URL = "redis://localhost:6379/0"
 if not RESULT_BACKEND_URL:
-    raise RuntimeError("CELERY_RESULT_BACKEND_URL_PROPHET no está definida en el entorno.")
+    RESULT_BACKEND_URL = "redis://localhost:6379/4"
 
 celery_app = Celery(
     "prophet_worker",
