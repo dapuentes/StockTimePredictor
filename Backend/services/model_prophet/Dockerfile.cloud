@@ -1,0 +1,39 @@
+# =============================================================================
+# Prophet SERVICE - Dockerfile for Google Cloud Run
+# =============================================================================
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies for Prophet
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install requirements
+COPY services/model_prophet/requirements.cloud.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY utils/ ./utils/
+COPY services/model_prophet/ ./services/model_prophet/
+
+# Create models directory
+RUN mkdir -p /app/models/prophet
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV LOCAL_MODEL_DIR=/app/models
+
+# Expose port
+EXPOSE 8004
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8004/health || exit 1
+
+# Run with extended timeout for training
+CMD ["sh", "-c", "gunicorn services.model_prophet.app_cloud:app --bind :${PORT:-8004} --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 600 --keep-alive 120 --access-logfile - --error-logfile -"]
