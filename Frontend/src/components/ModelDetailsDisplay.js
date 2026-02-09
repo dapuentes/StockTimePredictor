@@ -1,5 +1,5 @@
 import React from 'react';
-import { Descriptions, Tooltip, Tag } from 'antd'; 
+import { Descriptions, Tooltip, Tag, Typography } from 'antd'; 
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import { parsePythonStringLiteral } from '../utils/pythonUtils';
 
@@ -29,7 +29,7 @@ function ModelDetailsDisplay({ latestRun }) {
 
     // Si no hay datos de una ejecución, muestra un mensaje
     if (!latestRun) {
-        return <p>No hay detalles de modelo disponibles. Entrena o pronostica primero.</p>;
+        return <Typography.Text type="secondary">No hay detalles de modelo disponibles. Entrena o pronostica primero.</Typography.Text>;
     }    // Extrae los datos necesarios de latestRun
     const { modelType, ticker, bestParams = {}, featureNames = [] } = latestRun;
 
@@ -44,15 +44,14 @@ function ModelDetailsDisplay({ latestRun }) {
         : {};
 
     return (        <div>
-            <p>Información sobre el modelo:</p>
-            <ul>
-                <li><strong>Tipo:</strong> {modelType || 'N/A'}</li>
-                <li><strong>Ticker:</strong> {ticker || 'N/A'}</li>
-                <li><strong>Rango de Fechas:</strong> {latestRun.dateRange || 'N/A'}</li>
-                <li><strong>Estado:</strong> <Tag color="success">Activo</Tag></li>
-            </ul>{Object.keys(finalBestParams).length > 0 && (
+            <Descriptions bordered size="small" column={2} style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="Tipo">{modelType || 'N/A'}</Descriptions.Item>
+                <Descriptions.Item label="Ticker">{ticker || 'N/A'}</Descriptions.Item>
+                <Descriptions.Item label="Rango de Fechas">{latestRun.dateRange || 'N/A'}</Descriptions.Item>
+                <Descriptions.Item label="Estado"><Tag color="success">Activo</Tag></Descriptions.Item>
+            </Descriptions>{Object.keys(finalBestParams).length > 0 && (
                 <>
-                    <h4 style={{ marginTop: '16px' }}>Hiperparámetros Optimizados:</h4>
+                    <Typography.Title level={5} style={{ marginTop: 16 }}>Hiperparámetros Optimizados</Typography.Title>
                     <Descriptions bordered size="small" column={1}>
                         {Object.entries(finalBestParams).map(([key, value]) => {
                             const cleanKey = key.replace('rf__', '').replace('selector__', '');
@@ -93,7 +92,7 @@ function ModelDetailsDisplay({ latestRun }) {
                     </Descriptions>
                 </>
             )}            {Object.keys(finalBestParams).length === 0 && (
-                 <p style={{ marginTop: '16px' }}><i>No hay hiperparámetros optimizados disponibles para esta ejecución.</i></p>
+                 <Typography.Text type="secondary" style={{ display: 'block', marginTop: 16 }}>No hay hiperparámetros optimizados disponibles para esta ejecución.</Typography.Text>
             )}
         </div>
     );

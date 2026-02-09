@@ -252,7 +252,7 @@ class TimeSeriesLSTMModel:
             y_train,
             epochs=epochs,
             batch_size=batch_size,
-            validation_split=validation_data,
+            validation_data=validation_data,
             callbacks=callbacks,
             verbose=1
         )

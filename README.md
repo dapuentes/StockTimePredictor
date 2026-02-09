@@ -8,129 +8,137 @@
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D.svg)](https://redis.io)
 [![Celery](https://img.shields.io/badge/Celery-Task_Queue-37B24D.svg)](https://celeryproject.org)
 
-**StockTimePredictor** es una plataforma avanzada de pronóstico bursátil que utiliza procesamiento asíncrono, machine learning distribuido y una interfaz moderna para predecir precios de acciones. Con arquitectura de microservicios, colas de tareas distribuidas y procesamiento GPU, ofrece entrenamiento concurrente de múltiples modelos y monitoreo en tiempo real.
+**StockTimePredictor** es una plataforma de pronóstico bursátil que combina procesamiento asíncrono, machine learning distribuido y una interfaz profesional para predecir precios de acciones. Arquitectura de microservicios con colas de tareas distribuidas, soporte GPU y entrenamiento concurrente de múltiples modelos con monitoreo en tiempo real.
 
 ---
 
 ## 🧠 Características Principales
 
-### 🔮 Predicción Avanzada
-- **Múltiples modelos**: LSTM, Random Forest, XGBoost (Prophet en desarrollo)
+### Predicción Multi-Modelo
+- **4 modelos en producción**: LSTM, Random Forest, XGBoost y Prophet
 - **Procesamiento asíncrono**: Entrenamiento en background con Celery + Redis
-- **Colas distribuidas**: Manejo de múltiples trabajos concurrentes por modelo
-- **Intervalos de confianza**: Estimación de incertidumbre en predicciones
-- **Optimización automática**: Hyperparameter tuning con Keras Tuner y Optuna
-- **Soporte GPU**: Aceleración NVIDIA para modelos LSTM
+- **Colas distribuidas**: Trabajos concurrentes por modelo con workers independientes
+- **Intervalos de confianza**: Estimación de incertidumbre (Monte Carlo Dropout en LSTM, bootstrap en RF)
+- **Optimización automática**: KerasTuner (LSTM), TimeSeriesSplit + RandomizedSearchCV (RF, XGBoost), Cross-validation Prophet
+- **Soporte GPU**: Aceleración NVIDIA para entrenamiento LSTM
 
-### 🏗️ Arquitectura Moderna
-- **Microservicios distribuidos**: API Gateway + servicios especializados por modelo
-- **Procesamiento asíncrono**: Celery workers para entrenamiento no bloqueante
-- **Redis como broker**: Gestión de colas y almacenamiento de resultados
-- **Containerización completa**: Docker Compose con volúmenes persistentes
-- **Escalabilidad horizontal**: Fácil adición de workers y servicios
+### Interpretabilidad y Ensemble
+- **SHAP Explainer**: Importancia de features, summary plots y waterfall plots para modelos basados en árboles
+- **Predictor Ensemble**: Combinación de predicciones con promedio ponderado, mediana, mejor modelo o promedio simple
+- **Ponderación por MAE**: El ensemble asigna pesos inversamente proporcionales al error de cada modelo
 
-### 💻 Interfaz Avanzada
-- **Dashboard reactivo**: Monitoreo en tiempo real con Ant Design
-- **Gestión de trabajos**: Seguimiento de múltiples entrenamientos simultáneos
-- **Panel de modelos**: Visualización, re-entrenamiento y gestión de modelos guardados
-- **Análisis de residuales**: Diagnósticos ACF/PACF para validación de modelos
-- **Exportación avanzada**: Descarga de pronósticos y métricas en CSV
-- **Temas personalizables**: Modo claro/oscuro con ConfigProvider
+### Arquitectura
+- **Microservicios**: API Gateway + 6 servicios especializados (RF, LSTM, XGBoost, Prophet, SHAP, Ensemble)
+- **Procesamiento asíncrono**: Celery workers con Redis como broker (DBs separadas por modelo)
+- **Docker Compose**: 13 contenedores orquestados con volúmenes persistentes
+- **Escalabilidad horizontal**: Workers y servicios independientes
 
-### 📊 Análisis Completo
-- **Preprocesamiento inteligente**: Pipeline automático de limpieza y transformación
-- **Validación robusta**: Cross-validation con métricas detalladas (MAE, RMSE, MAPE, R²)
-- **Comparación de modelos**: Benchmarking automático entre algoritmos
-- **Visualización interactiva**: Gráficos con zoom, pan y anotaciones
-- **Metadatos detallados**: Tracking completo de experimentos y resultados
+### Interfaz Profesional
+- **Sistema de diseño centralizado**: ~90 CSS variables, paleta financiera, nomenclatura BEM
+- **Dashboard reactivo**: Ant Design 5 + Chart.js con zoom/pan interactivo
+- **Onboarding contextual**: Welcome card con stepper progresivo para nuevos usuarios
+- **Tema claro/oscuro**: Conmutación completa con variables CSS sincronizadas
+- **7 tabs de análisis**: Gráfico, Métricas, Detalles del modelo, Comparación, Residuales, SHAP y Predicción Ensemble
+- **Gestión de trabajos**: Seguimiento en tiempo real de entrenamientos concurrentes
+- **Exportación CSV**: Descarga de pronósticos y métricas
 
 ---
 
 ## 🏗️ Arquitectura del Sistema
 
-```bash
+```
 StockTimePredictor/
-├── 🐳 docker-compose.yml                # Orquestación de servicios
-├── 📄 README.md                         # Documentación principal
+├── docker-compose.yml                   # Orquestación de 13 servicios
+├── README.md
 │
-├── 🎨 Frontend/                         # Interfaz de Usuario (React + Ant Design)
-│   ├── 📱 public/
-│   │   └── index.html                   # Punto de entrada HTML
-│   ├── ⚛️ src/
-│   │   ├── 🧩 components/               # Componentes React especializados
-│   │   │   ├── ConfigurationPanel_AntD.js   # Panel de configuración avanzado
-│   │   │   ├── GraphDisplay.js              # Visualización con Chart.js + zoom
-│   │   │   ├── MetricsDisplay_AntD.js       # Métricas y resultados detallados
-│   │   │   ├── ModelComparisonTable.js     # Comparación entre modelos
-│   │   │   ├── ActiveTrainingJobs.js       # Monitor de trabajos concurrentes
-│   │   │   ├── ResidualsDisplay.js         # Análisis ACF/PACF de residuales
-│   │   │   ├── LoadingSpinner.js           # Indicadores de carga
-│   │   │   ├── ErrorMessage.js             # Manejo de errores
-│   │   │   └── HelpModal.js                # Sistema de ayuda
-│   │   ├── 🎣 hooks/                    # Custom hooks de React
-│   │   │   └── useApiMutations.js          # Gestión de mutaciones API con TanStack Query
-│   │   ├── 🌐 services/                 # Servicios de comunicación
-│   │   │   └── api.js                      # Cliente HTTP con Axios
-│   │   ├── 🛠️ utils/                    # Utilidades del frontend
-│   │   │   └── pythonUtils.js              # Parsing de metadatos Python
-│   │   ├── App.js                      # Componente principal con gestión de estado
-│   │   ├── App.css                     # Estilos globales
-│   │   └── index.js                    # Punto de entrada React + QueryClient
-│   └── 📦 package.json                 # Dependencias y scripts
+├── Frontend/                            # React 18 + Ant Design 5
+│   ├── public/
+│   │   └── index.html
+│   ├── src/
+│   │   ├── components/                  # Componentes React
+│   │   │   ├── ConfigurationPanel_AntD.js   # Panel de configuración
+│   │   │   ├── GraphDisplay.js              # Chart.js con zoom/pan/export
+│   │   │   ├── MetricsDisplay_AntD.js       # Métricas detalladas
+│   │   │   ├── ModelComparisonTable.js      # Benchmarking entre modelos
+│   │   │   ├── ModelDetailsDisplay.js       # Hiperparámetros con AntD Descriptions
+│   │   │   ├── ActiveTrainingJobs.js        # Monitor de trabajos concurrentes
+│   │   │   ├── ResidualsDisplay.js          # Análisis ACF/PACF
+│   │   │   ├── ShapExplainer.js             # Interpretabilidad SHAP
+│   │   │   ├── EnsemblePredictor.js         # Predicción ensemble multi-modelo
+│   │   │   ├── WelcomeCard.js               # Onboarding empty-state
+│   │   │   ├── HelpModal.js                 # Sistema de ayuda
+│   │   │   ├── dashboard/                   # StatsOverview, QuickActions
+│   │   │   └── layout/                      # AppHeader
+│   │   ├── context/
+│   │   │   └── AppContext.js                # Estado centralizado (useContext)
+│   │   ├── hooks/
+│   │   │   └── useApiMutations.js           # Mutaciones API con TanStack Query
+│   │   ├── services/
+│   │   │   └── api.js                       # Cliente HTTP (Axios)
+│   │   ├── styles/
+│   │   │   └── globals.css                  # Sistema de diseño (~90 variables CSS)
+│   │   ├── theme/
+│   │   │   └── themeConfig.js               # Tokens Ant Design (light + dark)
+│   │   ├── utils/
+│   │   │   └── pythonUtils.js               # Parsing de metadatos Python
+│   │   ├── App.js                           # Layout principal + routing de tabs
+│   │   └── index.js                         # React 18 + QueryClientProvider
+│   └── package.json
 │
-├── 🔧 Backend/                          # Servicios Backend (Python + FastAPI)
-│   ├── 🚪 api_gateway/                  # API Gateway (Orquestador Central)
-│   │   ├── app.py                      # Router principal con CORS
-│   │   ├── Dockerfile                  # Imagen Docker liviana
-│   │   └── requirements.txt            # FastAPI, httpx, uvicorn
+├── Backend/                             # Python + FastAPI
+│   ├── api_gateway/                     # Puerto 8000
+│   │   ├── app.py                       # Router central con CORS
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
 │   │
-│   ├── 🎯 services/                     # Microservicios Especializados
-│   │   ├── 🧠 model_lstm/               # Servicio LSTM con GPU
-│   │   │   ├── lstm_model.py           # Clase modelo LSTM optimizada
-│   │   │   ├── train.py                # Pipeline de entrenamiento con Keras Tuner
-│   │   │   ├── forecast.py             # Predicciones con intervalos de confianza
-│   │   │   ├── main.py                 # API FastAPI + endpoints
-│   │   │   ├── celery_app.py           # Configuración Celery + Redis
-│   │   │   ├── tasks.py                # Workers asíncronos para entrenamiento
-│   │   │   ├── Dockerfile              # TensorFlow + GPU support
-│   │   │   ├── requirements.txt        # TensorFlow, Keras, Celery, Redis
-│   │   │   └── models/                 # Modelos persistidos (.h5, .joblib)
+│   ├── services/
+│   │   ├── model_rf/                    # Puerto 8001
+│   │   │   ├── rf_model.py              # RandomForest + Pipeline + SelectFromModel
+│   │   │   ├── train.py                 # Pipeline: preprocesamiento → optimización → evaluación
+│   │   │   ├── forecast.py              # Predicción recursiva multi-step
+│   │   │   ├── main.py                  # API FastAPI
+│   │   │   ├── celery_app.py            # Worker Celery (Redis DB 1)
+│   │   │   └── tasks.py                 # Tareas asíncronas
 │   │   │
-│   │   ├── 🌳 model_rf/                 # Servicio Random Forest
-│   │   │   ├── rf_model.py             # Implementación Scikit-learn optimizada
-│   │   │   ├── train.py                # Pipeline con cross-validation
-│   │   │   ├── forecast.py             # Predicciones ensemble con bootstrap
-│   │   │   ├── main.py                 # API con endpoints de gestión
-│   │   │   ├── celery_app.py           # Workers distribuidos
-│   │   │   ├── tasks.py                # Tareas asíncronas de entrenamiento
-│   │   │   ├── Dockerfile              # Python slim + dependencias ML
-│   │   │   ├── requirements.txt        # Scikit-learn, Joblib, Celery
-│   │   │   └── models/                 # Modelos + metadata (.joblib, .json)
+│   │   ├── model_lstm/                  # Puerto 8002
+│   │   │   ├── lstm_model.py            # LSTM + Monte Carlo Dropout + KerasTuner
+│   │   │   ├── train.py                 # Pipeline con preprocesador compartido
+│   │   │   ├── forecast.py              # Predicción con intervalos de confianza
+│   │   │   ├── main.py                  # API FastAPI
+│   │   │   ├── celery_app.py            # Worker Celery (Redis DB 2)
+│   │   │   └── tasks.py                 # Tareas asíncronas
 │   │   │
-│   │   ├── ⚡ model_xgb/                # Servicio XGBoost (En desarrollo)
-│   │   │   ├── xgb_model.py            # Modelo XGBoost con Optuna
-│   │   │   ├── main_xgb.py             # API del servicio
-│   │   │   ├── forecast.py             # Predicciones con boosting
-│   │   │   ├── Dockerfile              # Contenedor especializado
-│   │   │   └── requirements.txt        # XGBoost, Optuna
+│   │   ├── model_xgb/                   # Puerto 8003
+│   │   │   ├── xgb_model.py             # XGBRegressor + TimeSeriesSplit
+│   │   │   ├── main_xgb.py              # API FastAPI
+│   │   │   ├── forecast.py              # Predicción recursiva con features
+│   │   │   ├── celery_app.py            # Worker Celery (Redis DB 3)
+│   │   │   └── tasks.py                 # Tareas asíncronas
 │   │   │
-│   │   └── 📈 model_prophet/            # Servicio Prophet (Meta) - En desarrollo
-│   │       ├── prophet_model.py        # Modelo Facebook Prophet
-│   │       ├── prophet_service.py      # Lógica de negocio
-│   │       ├── app.py                  # API del servicio
-│   │       ├── Dockerfile              # Contenedor con Prophet
-│   │       └── requirements.txt        # Prophet, holidays
+│   │   ├── model_prophet/               # Puerto 8004
+│   │   │   ├── prophet_model.py         # Prophet + optimización de hiperparámetros
+│   │   │   ├── prophet_service.py       # Lógica de negocio (train, evaluate, predict)
+│   │   │   ├── app.py                   # API FastAPI
+│   │   │   ├── celery_app.py            # Worker Celery (Redis DB 4)
+│   │   │   └── tasks.py                 # Tareas asíncronas
+│   │   │
+│   │   ├── shap_explainer/              # Puerto 8005
+│   │   │   ├── shap_explainer.py        # SHAP values para modelos de árboles
+│   │   │   └── app.py                   # API FastAPI
+│   │   │
+│   │   └── model_ensemble/              # Puerto 8006
+│   │       ├── ensemble_model.py        # Ensemble (weighted avg, median, best model)
+│   │       └── app.py                   # API FastAPI
 │   │
-│   ├── 🛠️ utils/                        # Utilidades Compartidas
-│   │   ├── preprocessing.py            # Pipeline de limpieza y features
-│   │   ├── import_data.py              # Descarga optimizada con yfinance
-│   │   ├── evaluation.py               # Métricas avanzadas y cross-validation
-│   │   ├── visualizations.py           # Generación de gráficos
-│   │   └── imports.py                  # Imports centralizados
+│   ├── utils/                           # Utilidades compartidas
+│   │   ├── preprocessing.py             # BasePreprocessor + Factory (RF, LSTM)
+│   │   ├── import_data.py               # Descarga con yfinance
+│   │   ├── evaluation.py                # evaluate_regression (mse, rmse, mae, mape)
+│   │   └── imports.py                   # Imports centralizados
 │   │
-│   └── 🎓 training/                     # Scripts de Entrenamiento Batch
+│   └── training/
 │       └── scripts/
-│           └── train_rf.py             # Entrenamiento offline masivo
+│           └── train_rf.py              # Entrenamiento offline
 ```
 
 ---
@@ -138,39 +146,68 @@ StockTimePredictor/
 ## ⚙️ Stack Tecnológico
 
 ### Backend
-- **Framework Web**: FastAPI con Uvicorn
-- **Procesamiento Asíncrono**: Celery + Redis
-- **Machine Learning**: TensorFlow/Keras, Scikit-learn, XGBoost, Prophet
-- **Datos**: yfinance, pandas, numpy
-- **Containerización**: Docker + Docker Compose
+| Componente | Tecnología |
+|---|---|
+| Framework Web | FastAPI + Uvicorn |
+| Procesamiento Asíncrono | Celery 5 + Redis 7 |
+| ML — Deep Learning | TensorFlow/Keras, KerasTuner |
+| ML — Ensemble/Boosting | Scikit-learn, XGBoost |
+| ML — Series Temporales | Prophet (Meta) |
+| ML — Interpretabilidad | SHAP |
+| Datos | yfinance, pandas, NumPy |
+| Containerización | Docker + Docker Compose |
 
 ### Frontend
-- **Framework**: React 18.3+ con JavaScript ES6+
-- **UI Components**: Ant Design 5.24+
-- **Visualización**: Chart.js + React-ChartJS-2
-- **Estado**: TanStack React Query
-- **HTTP**: Axios
+| Componente | Tecnología |
+|---|---|
+| Framework | React 18.3 (Create React App) |
+| UI Components | Ant Design 5.24 |
+| Visualización | Chart.js 4.4 + react-chartjs-2 + plugins (zoom, annotation) |
+| Estado servidor | TanStack React Query 5.75 |
+| HTTP | Axios |
+| Diseño | Sistema CSS propio (~90 variables, BEM, dark mode) |
 
 ### Infraestructura
-- **Message Broker**: Redis 7
-- **Containerización**: Docker Compose con volúmenes persistentes
-- **GPU Support**: NVIDIA Docker (opcional)
+| Componente | Tecnología |
+|---|---|
+| Message Broker | Redis 7 (DBs separadas por modelo) |
+| Orquestación | Docker Compose (13 contenedores) |
+| GPU Support | NVIDIA Docker (opcional, para LSTM) |
 
 ---
 
 ## 📈 Modelos de Machine Learning
 
-### Modelos Implementados ✅
+### Random Forest
+- Pipeline con `SelectFromModel` para selección de features + `RandomForestRegressor`
+- Optimización con `RandomizedSearchCV` + `TimeSeriesSplit`
+- Preprocesador compartido (`RandomForestPreprocessor`) con lags e ingeniería de features
+- Evaluación con métricas estandarizadas + análisis de residuales ACF/PACF
 
-- **LSTM**: Redes recurrentes para series temporales complejas con memoria a largo plazo y optimización automática
-- **Random Forest**: Ensemble de árboles para robustez general con bootstrapping y reducción de varianza  
-- **XGBoost**: Gradient boosting secuencial con regularización L1/L2 y alta precisión
+### LSTM (Long Short-Term Memory)
+- Arquitectura: 2 capas LSTM + BatchNormalization + Dropout + Dense
+- Optimización de hiperparámetros con KerasTuner (RandomSearch)
+- Monte Carlo Dropout para estimación de incertidumbre en predicciones
+- Predicción futura recursiva con reconstrucción de precio desde log-returns
+- Preprocesador compartido (`LSTMPreprocessor`) con secuencias temporales
 
-### Modelos en Desarrollo 🔜
+### XGBoost
+- `XGBRegressor` con optimización vía `RandomizedSearchCV` + `TimeSeriesSplit`
+- Ingeniería de features con lags e indicadores técnicos
+- Predicción recursiva multi-step con propagación de features
+- Escalado de features y target con inverse transform para evaluación
 
-- **Prophet**: Modelo de Facebook para estacionalidad automática, tendencias y días festivos
-- **Neural Network**: Red densa con dropout, batch normalization y early stopping
-- **Ensemble Meta-Model**: Combinación de modelos con voting/stacking y pesos dinámicos
+### Prophet
+- Modelo Facebook Prophet con regresores externos (Open, High, Low, Volume)
+- Optimización de hiperparámetros con cross-validation específica de Prophet
+- Soporte para estacionalidad automática y detección de changepoints
+- Predicción futura con `make_future_dataframe` e intervalos de confianza nativos
+
+### Ensemble
+- Combinación de predicciones de los 4 modelos base
+- Métodos: promedio ponderado (por MAE inverso), promedio simple, mediana, mejor modelo
+- Cálculo de incertidumbre ensemble (desviación estándar entre modelos)
+- Comparación visual de predicciones individuales vs. ensemble
 
 ---
 
@@ -178,175 +215,111 @@ StockTimePredictor/
 
 ### Prerrequisitos
 
-- **Git** 2.0+: Clonación del repositorio
-- **Docker** 20.0+: Containerización  
-- **Docker Compose** 2.0+: Orquestación de servicios
-- **Node.js** 16.0+: Frontend development (opcional para desarrollo)
-- **Python** 3.10+: Backend development (opcional para desarrollo)
-- **NVIDIA Docker**: GPU support (opcional)
+- **Docker** 20.0+ y **Docker Compose** 2.0+
+- **Node.js** 16.0+ (para desarrollo frontend)
+- **Python** 3.10+ (para desarrollo backend)
+- **NVIDIA Docker** (opcional, para GPU en LSTM)
 
-### 🔧 Instalación Completa
+### Inicio Rápido
 
-#### 1. Clonar el Repositorio
-
-```powershell
+```bash
+# 1. Clonar el repositorio
 git clone https://github.com/dapuentes/StockTimePredictor.git
 cd StockTimePredictor
-```
 
-#### 2. Configurar Variables de Entorno (Opcional)
-
-```powershell
-# Crear archivo .env para configuración personalizada
-echo "RF_SERVICE_URL=http://model-rf-api:8001" > .env
-echo "LSTM_SERVICE_URL=http://model-lstm-api:8002" >> .env
-echo "CELERY_BROKER_URL=redis://redis_broker:6379/0" >> .env
-```
-
-#### 3. Iniciar Backend con Docker
-
-```powershell
-# Construir todas las imágenes
+# 2. Construir e iniciar servicios
 docker-compose build
-
-# Iniciar todos los servicios en segundo plano
 docker-compose up -d
 
-# Verificar que los servicios estén ejecutándose
+# 3. Verificar servicios
 docker-compose ps
-```
 
-**Servicios Disponibles:**
-- 🚪 **API Gateway**: `http://localhost:8000`
-- 🔴 **Redis Broker**: `http://localhost:6379` (interno)
-- 🧠 **LSTM Service**: `http://localhost:8002` (interno)
-- 🌳 **Random Forest API**: `http://localhost:8001` (interno)
-- ⚡ **XGBoost**: `http://localhost:8003` (interno)
-
-#### 4. Configurar y Ejecutar Frontend
-
-```powershell
-# Navegar al directorio frontend
+# 4. Iniciar frontend (desarrollo)
 cd Frontend
-
-# Instalar dependencias
 npm install
-
-# Iniciar servidor de desarrollo
 npm start
 ```
 
-**Frontend Disponible**: `http://localhost:3000`
+**Servicios disponibles:**
 
-#### 5. Verificar Instalación
+| Servicio | URL | Descripción |
+|---|---|---|
+| Frontend | `http://localhost:3000` | Interfaz de usuario |
+| API Gateway | `http://localhost:8000` | Router central |
+| Random Forest | `http://localhost:8001` | Servicio RF (interno) |
+| LSTM | `http://localhost:8002` | Servicio LSTM (interno) |
+| XGBoost | `http://localhost:8003` | Servicio XGBoost (interno) |
+| Prophet | `http://localhost:8004` | Servicio Prophet (interno) |
+| SHAP | `http://localhost:8005` | Interpretabilidad (interno) |
+| Ensemble | `http://localhost:8006` | Combinación de modelos (interno) |
+| Redis | `localhost:6379` | Broker de mensajes (interno) |
 
-```powershell
-# Verificar API Gateway
-curl http://localhost:8000/
+### Desarrollo Local (Sin Docker)
 
-# Verificar salud de servicios
-curl http://localhost:8000/health
+```bash
+# Backend — instalar dependencias por servicio
+cd Backend/api_gateway && pip install -r requirements.txt
+cd ../services/model_lstm && pip install -r requirements.txt
+# ... repetir para cada servicio
 
-# Ver logs de servicios
-docker-compose logs api-gateway
-docker-compose logs model-lstm-api
-```
-
-### 🛠️ Desarrollo Local (Sin Docker)
-
-Para desarrollo sin Docker (requiere Redis local):
-
-```powershell
-# Instalar y configurar Redis local
-# Windows: Descargar Redis desde GitHub releases
-# O usar WSL: sudo apt install redis-server
-
-# Backend - Instalar dependencias por servicio
-cd Backend/api_gateway
-pip install -r requirements.txt
-
-cd ../services/model_lstm
-pip install -r requirements.txt
-
-# Iniciar workers Celery manualmente
-celery -A model_lstm.celery_app worker -l info
+# Iniciar workers Celery
+celery -A celery_app worker -l info
 
 # Frontend
-cd ../../../Frontend
+cd Frontend
 npm install
 npm start
 ```
 
----
-
-## 🧪 Cómo Usar la App
-
-### 🎯 Flujo Básico de Uso
-
-1. **Acceder a la Aplicación**
-   - Frontend: `http://localhost:3000`
-   - Asegúrate de que todos los servicios Docker estén ejecutándose
-
-2. **Configurar Parámetros de Entrenamiento**
-   - **Ticker**: Símbolo de la acción (ej. AAPL, TSLA, MSFT)
-   - **Rango de fechas**: Período histórico para entrenamiento
-   - **Modelo**: Seleccionar entre RF (Random Forest), LSTM, XGBoost
-   - **Parámetros específicos**: 
-     - **LSTM**: sequence_length, lags, optimize_params
-     - **RF**: n_estimators, max_depth, n_lags
-     - **XGBoost**: n_estimators, learning_rate, max_depth
-
-3. **Iniciar Entrenamiento Asíncrono**
-   - Clic en **"Entrenar Modelo"**
-   - El entrenamiento se ejecuta en **background** usando Celery workers
-   - Monitorea el progreso en tiempo real con la barra de progreso
-   - Visualiza trabajos activos en el panel **"Active Training Jobs"**
-
-4. **Seguimiento de Trabajos**
-   - **Panel de trabajos activos**: Muestra todos los entrenamientos en curso
-   - **Estados disponibles**: `PENDING`, `PROGRESS`, `SUCCESS`, `FAILURE`
-   - **Información detallada**: Progreso, tiempo transcurrido, mensajes de estado
-   - **Cancelación**: Posibilidad de cancelar trabajos en progreso
-
-5. **Revisar Resultados del Entrenamiento**
-   - **Métricas de evaluación**: MAE, RMSE, MAPE
-   - **Metadatos del modelo**: Tiempo de entrenamiento, parámetros utilizados
-   - **Gráficos de entrenamiento**: Curvas de pérdida (para LSTM)
-   - **Feature importance**: Importancia de variables (para RF/XGBoost)
-
-6. **Generar Pronósticos**
-   - **Horizonte de predicción**: Número de días a futuro (1-30)
-   - **Intervalos de confianza**: Bandas de incertidumbre
-   - **Visualización interactiva**: Gráfico con zoom, pan y anotaciones
-   - **Exportación**: Descarga de resultados en formato CSV
-
-7. **Análisis Avanzado**
-   - **Comparación de modelos**: Benchmarking automático entre algoritmos
-   - **Análisis de residuales**: Diagnósticos ACF/PACF para validación
-   - **Gestión de modelos**: Re-entrenamiento y versionado de modelos
-
-### 🔄 Características del Sistema Asíncrono
-
-- **Entrenamiento concurrente**: Múltiples modelos pueden entrenarse simultáneamente
-- **Persistencia de trabajos**: Los trabajos continúan aunque cierres el navegador
-- **Notificaciones en tiempo real**: Actualizaciones de progreso sin necesidad de refrescar
-- **Gestión de recursos**: Distribución inteligente de carga entre workers
-- **Recuperación de errores**: Manejo robusto de fallos y reintentos automáticos
+> **Nota**: El comando de frontend es `npm start` (Create React App), no `npm run dev`.
 
 ---
 
-## 🌐 API - Comunicación Frontend <-> Backend
+## 🧪 Cómo Usar la Aplicación
 
-### 🔄 Endpoints Principales
+### Flujo Básico
 
-- **POST /train/{modelType}**: Iniciar entrenamiento asíncrono (retorna `job_id`)
-- **GET /train-status/{modelType}/{job_id}**: Consultar estado del entrenamiento  
-- **POST /cancel-training/{modelType}/{job_id}**: Cancelar entrenamiento en progreso
-- **GET /predict/{modelType}**: Generar predicciones con modelo entrenado
-- **GET /models/{modelType}**: Listar modelos disponibles
-- **GET /health**: Estado de salud de todos los servicios
+1. **Seleccionar ticker y modelo** en el panel de Configuración (izquierda)
+2. **Entrenar** con el botón "Entrenar Modelo" en la barra de acciones rápidas
+3. **Monitorear** el progreso en el panel de Entrenamientos Activos
+4. **Generar pronóstico** con el botón "Pronosticar"
+5. **Analizar resultados** en las 7 pestañas del panel de Resultados
 
-### 🎯 Flujo de Entrenamiento Asíncrono
+### Pestañas de Resultados
+
+| Tab | Contenido |
+|---|---|
+| Gráfico y Pronóstico | Serie temporal histórica + forecast con intervalos de confianza |
+| Métricas Detalladas | MSE, RMSE, MAE, MAPE, R² |
+| Detalles del Modelo | Hiperparámetros optimizados con tooltips explicativos |
+| Comparación de Modelos | Benchmarking automático entre todos los modelos entrenados |
+| Residuales | Diagnósticos ACF/PACF para validación estadística |
+| Interpretabilidad SHAP | Feature importance, summary plots, waterfall plots |
+| Predicción Ensemble | Combinación multi-modelo con comparación visual |
+
+### Sistema Asíncrono
+
+- Entrenamiento concurrente de múltiples modelos en background
+- Los trabajos persisten aunque se cierre el navegador
+- Actualización de progreso en tiempo real vía polling
+- Cancelación y reintento de trabajos desde la interfaz
+
+---
+
+## 🌐 API — Endpoints Principales
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/train/{modelType}` | Iniciar entrenamiento asíncrono → retorna `job_id` |
+| `GET` | `/train-status/{modelType}/{job_id}` | Consultar estado del entrenamiento |
+| `POST` | `/cancel-training/{modelType}/{job_id}` | Cancelar entrenamiento |
+| `GET` | `/predict/{modelType}` | Generar predicciones |
+| `GET` | `/models/{modelType}` | Listar modelos disponibles |
+| `GET` | `/health` | Estado de salud de todos los servicios |
+| `POST` | `/shap/explain` | Obtener explicación SHAP |
+| `POST` | `/ensemble/predict` | Predicción ensemble multi-modelo |
+
+### Flujo de Entrenamiento Asíncrono
 
 ```mermaid
 sequenceDiagram
@@ -359,7 +332,7 @@ sequenceDiagram
     API Gateway->>Celery Worker: Envía tarea a cola
     API Gateway->>Frontend: Retorna job_id
     
-    loop Monitoreo
+    loop Polling
         Frontend->>API Gateway: GET /train-status/lstm/{job_id}
         API Gateway->>Redis: Consulta estado
         Redis->>API Gateway: Estado actual
@@ -370,75 +343,49 @@ sequenceDiagram
     Celery Worker->>Redis: Guarda resultado final
 ```
 
-Implementado en: `frontend/src/services/api.js` y `backend/api_gateway/app.py`
-
-### Características del Sistema Asíncrono
-
-- **Entrenamiento concurrente**: Múltiples modelos pueden entrenarse simultáneamente
-- **Monitoreo en tiempo real**: Consulta de progreso con `job_id`
-- **Gestión de trabajos**: Cancelación y listado de trabajos activos
-- **Manejo de errores**: Respuestas detalladas para fallos y validaciones
-
----
-
 ---
 
 ## 🛠️ Desarrollo y Contribución
 
 ### Próximas Funcionalidades
-- **Modelo Prophet**: Integración completa de Meta Prophet
+- **Modelo Bayesiano**: BayesianRidge como nuevo modelo base
 - **Real-time Data**: Streaming de datos en tiempo real
 - **Advanced Analytics**: Análisis de sentimiento y noticias
-- **Mobile App**: Aplicación móvil React Native
 - **Cloud Deployment**: Deploy en AWS/GCP/Azure
 
-### Mejoras Técnicas
+### Mejoras Técnicas Planeadas
 - **Testing Coverage**: Pruebas unitarias y de integración
 - **CI/CD Pipeline**: GitHub Actions para deployment
-- **Performance Monitoring**: Métricas de rendimiento en producción
-- **Database Integration**: PostgreSQL para persistencia
-
-### Configuración para Desarrollo
-
-```bash
-# 1. Fork del repositorio en GitHub
-# 2. Clonar tu fork
-git clone https://github.com/TU_USUARIO/StockTimePredictor.git
-cd StockTimePredictor
-
-# 3. Crear rama para feature
-git checkout -b feature/nueva-funcionalidad
-
-# 4. Configurar entorno de desarrollo
-# Backend
-python -m venv venv
-venv\Scripts\activate
-pip install -r Backend/api_gateway/requirements.txt
-
-# Frontend
-cd Frontend
-npm install
-```
+- **Database Integration**: PostgreSQL para persistencia de experimentos
 
 ### Pull Request Guidelines
 
-1. **Descripción Clara**: Explica qué cambios introduces
-2. **Tests**: Incluye pruebas para nuevas funcionalidades
-3. **Documentación**: Actualiza README y docstrings
-4. **Screenshots**: Para cambios de UI, incluye capturas
+1. Descripción clara de los cambios
+2. Tests para nuevas funcionalidades
+3. Actualizar README y docstrings
+4. Screenshots para cambios de UI
+
+---
 
 ## Monitoreo y Logs
 
 ```bash
-# Ver logs en tiempo real
+# Logs en tiempo real
 docker-compose logs -f api-gateway
 docker-compose logs -f model-lstm
+
+# Estado de todos los servicios
+docker-compose ps
+
+# Reiniciar un servicio específico
+docker-compose restart model-rf-api
+```
 
 ---
 
 ## 🤝 Contribuciones
 
-¡Las contribuciones son bienvenidas!  
+¡Las contribuciones son bienvenidas!
 Abre un pull request o issue para sugerencias, mejoras o reportes de errores.
 
 ---
@@ -446,5 +393,3 @@ Abre un pull request o issue para sugerencias, mejoras o reportes de errores.
 ## 📄 Licencia
 
 Este proyecto está bajo licencia [MIT](https://opensource.org/licenses/MIT).
-
----

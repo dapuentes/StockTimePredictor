@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import App from './App_new'; // Usar la nueva versión refactorizada
+import App from './App';
 
 // Configuración del Query Client con mejores opciones
 const queryClient = new QueryClient({

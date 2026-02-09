@@ -49,7 +49,7 @@ The `XGBoostModel` class encapsulates a robust regression workflow using `XGBReg
 
 
 from xgboost import XGBClassifier, XGBRegressor
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 import joblib
 import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -92,8 +92,7 @@ class XGBoostModel:
             subsample=subsample,
             colsample_bytree=colsample_bytree,
             gamma=gamma,
-            random_state=42,
-            n_lags=n_lags
+            random_state=42
         )
         self.n_lags = n_lags
         self.feature_importances_ = None
@@ -185,13 +184,16 @@ class XGBoostModel:
 
         base_model = XGBRegressor(objective='reg:squarederror', random_state=42)
         
+        # Use TimeSeriesSplit to prevent temporal data leakage
+        tscv = TimeSeriesSplit(n_splits=cv)
+        
         search = RandomizedSearchCV(
             base_model, 
             param_grid, 
             n_iter=n_iter,
             scoring='neg_mean_squared_error', 
             n_jobs=-1,
-            cv=cv, 
+            cv=tscv, 
             random_state=42,
             verbose=1
         )
@@ -334,34 +336,59 @@ class XGBoostModel:
         Predicción recursiva de valores futuros
 
         Parámetros:
-        - X_test: Los datos de entrada que deben contener columnas de lag para la predicción.
+        - X_test: Los datos de entrada (DataFrame o array) con todas las features usadas en entrenamiento.
         - forecast_horizon: Horizonte de predicción (número de pasos futuros a predecir).
 
         Devuelve:
         - Array de predicciones futuras
         """
 
-        # Verificar que X_test es un DataFrame y que contiene columnas de lag
         if isinstance(X_test, pd.DataFrame):
-            lag_columns = [col for col in X_test.columns if '_lag_' in col]
+            # Use all feature columns, not just lags
+            feature_cols = X_test.columns.tolist()
+            lag_columns = [col for col in feature_cols if '_lag_' in col]
+            non_lag_columns = [col for col in feature_cols if '_lag_' not in col]
+            
             if not lag_columns:
-                raise ValueError("Input data must contain lag columns for prediction.")
-            # Tomamos la última fila con las columnas de lag
-            input_data = X_test[lag_columns].iloc[-1:].values
+                raise ValueError("Input data must contain lag columns for recursive prediction.")
+            
+            # Start with the last row of all features
+            current_features = X_test.iloc[-1:].copy()
         else:
-            input_data = np.array(X_test).reshape(1, -1)
+            # Fallback for array input — use all columns
+            current_features = pd.DataFrame(X_test.reshape(1, -1)) if X_test.ndim == 1 else pd.DataFrame(X_test[-1:])
+            lag_columns = list(range(current_features.shape[1]))
+            non_lag_columns = []
 
-        # Predicción recursiva
         predictions = []
-        current_input = input_data.copy()
 
         for _ in range(forecast_horizon):
-            pred = self.model.predict(current_input)[0]
+            if isinstance(current_features, pd.DataFrame) and len(current_features.columns) > 0:
+                pred = self.model.predict(current_features.values)[0]
+            else:
+                pred = self.model.predict(current_features)[0]
             predictions.append(pred)
 
-            # Actualizar el input deslizando las características a la izquierda y añadiendo la predicción al final
-            current_input = np.roll(current_input, -1)
-            current_input[0, -1] = pred
+            # Update lag features: shift lags by 1 and insert new prediction as lag_1
+            if isinstance(X_test, pd.DataFrame):
+                new_row = current_features.copy()
+                # Sort lag columns by lag number descending to shift correctly
+                sorted_lags = sorted(lag_columns, key=lambda c: int(c.split('_lag_')[-1]), reverse=True)
+                for i, col in enumerate(sorted_lags):
+                    if i + 1 < len(sorted_lags):
+                        # Shift: lag_N = previous lag_(N-1)
+                        new_row[col] = current_features[sorted_lags[i + 1]].values[0]
+                    else:
+                        # lag_1 = new prediction
+                        new_row[col] = pred
+                # Non-lag features (technical indicators) are carried forward as-is
+                # This is an approximation; a full recomputation would require OHLCV data
+                current_features = new_row
+            else:
+                current_input = current_features.values.copy() if hasattr(current_features, 'values') else current_features.copy()
+                current_input = np.roll(current_input, -1)
+                current_input[0, -1] = pred
+                current_features = pd.DataFrame(current_input)
 
         return np.array(predictions)
     

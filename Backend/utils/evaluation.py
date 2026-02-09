@@ -27,18 +27,18 @@ def evaluate_regression(y_true, y_pred):
         Returns:
         dict
             A dictionary containing the calculated metrics:
-            MSE (float): The mean squared error between y_true and y_pred.
-            RMSE (float): The root mean squared error between y_true and y_pred.
-            MAE (float): The mean absolute error between y_true and y_pred.
-            MAPE (float): The mean absolute percentage error between y_true and y_pred.
+            mse (float): The mean squared error between y_true and y_pred.
+            rmse (float): The root mean squared error between y_true and y_pred.
+            mae (float): The mean absolute error between y_true and y_pred.
+            mape (float): The mean absolute percentage error between y_true and y_pred.
     """
     mse = mean_squared_error(y_true, y_pred)
     rmse = root_mean_squared_error(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
     mape = mean_absolute_percentage_error(y_true, y_pred)
     return {
-        "MSE": mse,
-        "RMSE": rmse,
-        "MAE": mae,
-        "MAPE": mape
+        "mse": mse,
+        "rmse": rmse,
+        "mae": mae,
+        "mape": mape
     }

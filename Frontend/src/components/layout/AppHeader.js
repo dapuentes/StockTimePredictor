@@ -38,7 +38,7 @@ function AppHeader({
             <Badge count={activeJobsCount} offset={[-5, 5]}>
               <Button 
                 type="text" 
-                icon={<BellOutlined style={{ color: 'white', fontSize: '18px' }} />}
+                icon={<BellOutlined style={{ color: 'rgba(255,255,255,0.85)', fontSize: '16px' }} />}
               />
             </Badge>
           </Tooltip>
@@ -48,7 +48,7 @@ function AppHeader({
         <Tooltip title="Ver en GitHub">
           <Button
             type="text"
-            icon={<GithubOutlined style={{ color: 'white', fontSize: '18px' }} />}
+            icon={<GithubOutlined style={{ color: 'rgba(255,255,255,0.85)', fontSize: '16px' }} />}
             href="https://github.com/dapuentes/StockTimePredictor"
             target="_blank"
           />
@@ -57,10 +57,10 @@ function AppHeader({
         {/* Botón de ayuda */}
         <Button
           type="text"
-          icon={<QuestionCircleOutlined style={{ color: 'white', fontSize: '18px' }} />}
+          icon={<QuestionCircleOutlined style={{ color: 'rgba(255,255,255,0.85)', fontSize: '16px' }} />}
           onClick={onHelpClick}
         >
-          <span style={{ color: 'white', marginLeft: '4px' }}>Ayuda</span>
+          <span style={{ color: 'rgba(255,255,255,0.85)' }}>Ayuda</span>
         </Button>
         
         {/* Switch de tema */}
@@ -70,9 +70,6 @@ function AppHeader({
             unCheckedChildren={<SunOutlined />}
             onChange={onThemeToggle}
             checked={currentTheme === 'dark'}
-            style={{ 
-              backgroundColor: currentTheme === 'dark' ? '#4299e1' : '#718096'
-            }}
           />
         </Space>
       </div>
