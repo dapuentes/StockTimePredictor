@@ -23,7 +23,7 @@ import {
     ReloadOutlined,
     QuestionCircleOutlined
 } from '@ant-design/icons';
-import { getShapExplanation, getGlobalImportance, getShapPlot, getWaterfallPlot } from '../services/api';
+import { getGlobalImportance, getShapPlot, getWaterfallPlot } from '../services/api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -56,21 +56,6 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
         { value: 'xgboost', label: 'XGBoost', description: 'Gradient Boosting' },
         { value: 'rf', label: 'Random Forest', description: 'Ensemble de árboles' }
     ];
-
-    // Fetch SHAP explanation
-    const fetchExplanation = useCallback(async () => {
-        setLoading(prev => ({ ...prev, explanation: true }));
-        setError(null);
-        try {
-            const result = await getShapExplanation(ticker, selectedModel, 10);
-            setData(prev => ({ ...prev, explanation: result }));
-        } catch (err) {
-            setError(err.message);
-            onError?.(err);
-        } finally {
-            setLoading(prev => ({ ...prev, explanation: false }));
-        }
-    }, [ticker, selectedModel, onError]);
 
     // Fetch global importance
     const fetchGlobalImportance = useCallback(async () => {
@@ -148,8 +133,7 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
                             <div 
                                 className="feature-bar" 
                                 style={{ 
-                                    width: `${(feature.importance / maxValue) * 100}%`,
-                                    background: `linear-gradient(90deg, #1890ff ${feature.importance * 100}%, #52c41a)`
+                                    width: `${(feature.importance / maxValue) * 100}%`
                                 }}
                             />
                         </div>
@@ -176,7 +160,7 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
                                 <ExperimentOutlined /> Importancia de Features (SHAP)
                             </Title>
                             <Tooltip title="Los valores SHAP miden la contribución de cada feature a la predicción">
-                                <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+                                <QuestionCircleOutlined style={{ color: 'var(--color-neutral-500)' }} />
                             </Tooltip>
                         </div>
                         
@@ -300,7 +284,7 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
                         <div className="section-header">
                             <Title level={5}>Waterfall Plot - Explicación Individual</Title>
                             <Tooltip title="Muestra cómo cada feature contribuye a una predicción específica">
-                                <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+                                <QuestionCircleOutlined style={{ color: 'var(--color-neutral-500)' }} />
                             </Tooltip>
                         </div>
 
@@ -347,7 +331,7 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
             className="shap-explainer-card"
             title={
                 <Space>
-                    <ExperimentOutlined style={{ color: '#1890ff' }} />
+                    <ExperimentOutlined style={{ color: 'var(--color-primary-500)' }} />
                     <span>Interpretabilidad SHAP</span>
                     <Tag color="blue">{ticker}</Tag>
                 </Space>
@@ -386,8 +370,8 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
                 />
             )}
 
-            <div className="shap-info-banner" style={{ marginBottom: 16 }}>
-                <InfoCircleOutlined style={{ marginRight: 8, color: '#1890ff' }} />
+            <div className="info-banner">
+                <InfoCircleOutlined style={{ color: 'var(--color-primary-500)', flexShrink: 0 }} />
                 <Text type="secondary">
                     SHAP (SHapley Additive exPlanations) proporciona una interpretación basada en 
                     teoría de juegos para explicar las predicciones de modelos de machine learning.
@@ -400,91 +384,6 @@ const ShapExplainer = ({ ticker = 'NU', onError }) => {
                 onChange={setActiveTab}
                 items={tabItems}
             />
-
-            <style>{`
-                .shap-explainer-card {
-                    border-radius: 12px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                }
-                
-                .shap-feature-list {
-                    margin-top: 16px;
-                }
-                
-                .shap-feature-item {
-                    margin-bottom: 12px;
-                    padding: 8px 12px;
-                    background: #fafafa;
-                    border-radius: 8px;
-                }
-                
-                .feature-header {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    margin-bottom: 6px;
-                }
-                
-                .feature-rank {
-                    background: #1890ff;
-                    color: white;
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }
-                
-                .feature-name {
-                    flex: 1;
-                }
-                
-                .feature-value {
-                    font-family: monospace;
-                }
-                
-                .feature-bar-container {
-                    height: 8px;
-                    background: #f0f0f0;
-                    border-radius: 4px;
-                    overflow: hidden;
-                }
-                
-                .feature-bar {
-                    height: 100%;
-                    border-radius: 4px;
-                    transition: width 0.5s ease;
-                }
-                
-                .loading-container {
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    padding: 40px;
-                }
-                
-                .plot-container {
-                    margin-top: 16px;
-                    text-align: center;
-                }
-                
-                .section-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    margin-bottom: 16px;
-                }
-                
-                .shap-info-banner {
-                    background: #e6f7ff;
-                    padding: 12px 16px;
-                    border-radius: 8px;
-                    border-left: 4px solid #1890ff;
-                }
-                
-                .tab-content {
-                    padding: 16px 0;
-                }
-            `}</style>
         </Card>
     );
 };

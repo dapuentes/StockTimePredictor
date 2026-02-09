@@ -1,114 +1,95 @@
 /**
- * Configuración del tema personalizado para Ant Design
- * Paleta de colores profesional para aplicación financiera
+ * Configuración del tema para Ant Design
+ * Paleta profesional financiera — alineada con globals.css
  */
 
-// Colores principales de la aplicación
 export const colors = {
-  // Colores primarios - Azul profesional financiero
   primary: {
-    main: '#1a365d',      // Azul oscuro profesional
-    light: '#2c5282',     // Azul medio
-    lighter: '#4299e1',   // Azul claro
-    lightest: '#ebf8ff',  // Azul muy claro (backgrounds)
+    main: '#1a3a6b',
+    light: '#22518f',
+    lighter: '#3d84c6',
+    lightest: '#ebf4ff',
   },
-  
-  // Colores de acento - Verde para ganancias, éxito
   success: {
-    main: '#22543d',
-    light: '#38a169',
+    main: '#1a5632',
+    light: '#2f9e5a',
     lighter: '#68d391',
     bg: '#f0fff4',
   },
-  
-  // Colores de advertencia/pérdida - Rojo
   danger: {
     main: '#c53030',
     light: '#fc8181',
     lighter: '#fed7d7',
     bg: '#fff5f5',
   },
-  
-  // Colores de advertencia - Naranja/Amarillo
   warning: {
-    main: '#c05621',
-    light: '#ed8936',
+    main: '#b7791f',
+    light: '#d69e2e',
     lighter: '#fbd38d',
     bg: '#fffaf0',
   },
-  
-  // Neutrales
   neutral: {
-    900: '#1a202c',   // Textos principales
-    800: '#2d3748',   // Textos secundarios
-    700: '#4a5568',   // Textos terciarios
-    600: '#718096',   // Textos deshabilitados
-    500: '#a0aec0',   // Bordes oscuros
-    400: '#cbd5e0',   // Bordes claros
-    300: '#e2e8f0',   // Divisores
-    200: '#edf2f7',   // Fondos hover
-    100: '#f7fafc',   // Fondos principales
-    50: '#ffffff',    // Blanco puro
+    900: '#171f2b',
+    800: '#232e3e',
+    700: '#374151',
+    600: '#5a6678',
+    500: '#8492a6',
+    400: '#b8c2cc',
+    300: '#d3dce6',
+    200: '#e8ecf1',
+    100: '#f4f6f9',
+    50: '#ffffff',
   },
-  
-  // Gradientes
   gradients: {
-    primary: 'linear-gradient(135deg, #1a365d 0%, #2c5282 50%, #4299e1 100%)',
-    success: 'linear-gradient(135deg, #22543d 0%, #38a169 100%)',
-    header: 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #1a365d 100%)',
-    card: 'linear-gradient(145deg, #ffffff 0%, #f8fafc 100%)',
+    primary: 'linear-gradient(135deg, #1a3a6b 0%, #2b6cb0 100%)',
+    success: 'linear-gradient(135deg, #1a5632 0%, #2f9e5a 100%)',
+    header: 'linear-gradient(135deg, #0c1e3a 0%, #142d54 40%, #1a3a6b 100%)',
+    card: 'linear-gradient(180deg, #ffffff 0%, #f9fafb 100%)',
   }
 };
 
-// Configuración del tema de Ant Design
+// Ant Design light theme tokens
 export const lightTheme = {
   token: {
-    // Colores base
     colorPrimary: colors.primary.light,
     colorSuccess: colors.success.light,
     colorWarning: colors.warning.light,
     colorError: colors.danger.main,
     colorInfo: colors.primary.lighter,
-    
-    // Tipografía
-    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     fontSize: 14,
-    fontSizeHeading1: 38,
-    fontSizeHeading2: 30,
-    fontSizeHeading3: 24,
-    fontSizeHeading4: 20,
-    fontSizeHeading5: 16,
-    
-    // Bordes
+    fontSizeHeading1: 36,
+    fontSizeHeading2: 28,
+    fontSizeHeading3: 22,
+    fontSizeHeading4: 18,
+    fontSizeHeading5: 15,
+
     borderRadius: 8,
     borderRadiusLG: 12,
     borderRadiusSM: 6,
-    
-    // Colores de fondo
+
     colorBgContainer: colors.neutral[50],
     colorBgLayout: colors.neutral[100],
     colorBgElevated: colors.neutral[50],
-    
-    // Colores de texto
+
     colorText: colors.neutral[900],
     colorTextSecondary: colors.neutral[700],
     colorTextTertiary: colors.neutral[600],
     colorTextDisabled: colors.neutral[500],
-    
-    // Sombras
-    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-    boxShadowSecondary: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-    
-    // Motion
+
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    boxShadowSecondary: '0 4px 8px -2px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.04)',
+
     motionDurationFast: '0.1s',
     motionDurationMid: '0.2s',
     motionDurationSlow: '0.3s',
   },
   components: {
     Layout: {
-      headerBg: 'transparent', // El header usará gradiente CSS
-      headerHeight: 72,
-      headerPadding: '0 24px',
+      headerBg: 'transparent',
+      headerHeight: 64,
+      headerPadding: '0 32px',
       bodyBg: colors.neutral[100],
       footerBg: colors.neutral[50],
     },
@@ -162,7 +143,7 @@ export const darkTheme = {
     colorInfo: '#63b3ed',
     
     // Tipografía
-    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     fontSize: 14,
     
     // Bordes
@@ -188,7 +169,7 @@ export const darkTheme = {
   components: {
     Layout: {
       headerBg: 'transparent',
-      headerHeight: 72,
+      headerHeight: 64,
       bodyBg: '#0f1419',
       footerBg: '#1a202c',
     },

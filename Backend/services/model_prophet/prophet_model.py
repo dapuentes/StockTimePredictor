@@ -250,7 +250,35 @@ class ProphetModel:
                     print(f"Error with parameters {params}: {e}")
                     continue
             
-            # Resto del código sin cambios...
+            # Select best parameters from results and apply them
+            if results:
+                best_params, best_rmse = min(results, key=lambda x: x[1])
+                self.best_params_ = best_params
+                print(f"Best parameters found: {best_params} with RMSE: {best_rmse}")
+                
+                # Rebuild the model with the optimized parameters
+                self.model = Prophet(
+                    changepoint_prior_scale=best_params['changepoint_prior_scale'],
+                    seasonality_prior_scale=best_params['seasonality_prior_scale'],
+                    holidays_prior_scale=best_params['holidays_prior_scale'],
+                    seasonality_mode=best_params['seasonality_mode']
+                )
+                
+                # Re-add regressors if they existed
+                regressors = [col for col in X_train.columns if col not in ['ds', 'y']]
+                for reg in regressors:
+                    self.model.add_regressor(reg)
+                
+                self.has_fitted = False  # Model needs to be re-fit with best params
+            else:
+                print("No successful parameter combinations found. Using default parameters.")
+                self.best_params_ = {
+                    'changepoint_prior_scale': 0.05,
+                    'seasonality_prior_scale': 10.0,
+                    'holidays_prior_scale': 10.0,
+                    'seasonality_mode': 'additive'
+                }
+                
         except Exception as e:
             print(f"Error during hyperparameter optimization: {e}")
             print("Using default parameters instead.")

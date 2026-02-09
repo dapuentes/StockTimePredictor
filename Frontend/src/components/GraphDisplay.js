@@ -78,12 +78,13 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
          chartData.datasets.push({
             label: `Precio Histórico (${ticker})`,
             data: historicalMappedValues, 
-            borderColor: 'rgb(75, 192, 192)',
-            backgroundColor: 'rgba(75, 192, 192, 0.5)',
-            tension: 0.1,
-            pointRadius: 1, 
+            borderColor: '#2b6cb0',
+            backgroundColor: 'rgba(43, 108, 176, 0.08)',
+            tension: 0.2,
+            pointRadius: 0, 
             pointHitRadius: 10,
-            fill: false
+            borderWidth: 2,
+            fill: true
         });
     }
 
@@ -103,7 +104,7 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
                 label: 'Límite Superior IC', 
                 data: forecastMappedUpperBound, 
                 borderColor: 'transparent', 
-                backgroundColor: 'rgba(255, 99, 132, 0.2)', 
+                backgroundColor: 'rgba(47, 158, 90, 0.12)', 
                 borderWidth: 1,
                 pointRadius: 0,
                 fill: '-1', 
@@ -113,12 +114,14 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
         chartData.datasets.push({
             label: 'Pronóstico',
             data: forecastMappedPredictions, 
-            borderColor: 'rgb(255, 99, 132)',
-            backgroundColor: 'rgba(255, 99, 132, 0.5)',
-            borderDash: [5, 5], // Línea punteada
-            tension: 0.1,
-            pointRadius: 2, 
+            borderColor: '#2f9e5a',
+            backgroundColor: 'rgba(47, 158, 90, 0.15)',
+            borderDash: [6, 4],
+            tension: 0.2,
+            pointRadius: 3, 
+            pointBackgroundColor: '#2f9e5a',
             pointHitRadius: 10,
+            borderWidth: 2.5,
             fill: false
         });
     }
@@ -145,21 +148,31 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-            legend: { position: 'top' },
-            title: { display: true, text: `Serie de Tiempo y Pronóstico para ${ticker}` },
+            legend: { 
+                position: 'top',
+                labels: {
+                    usePointStyle: true,
+                    pointStyle: 'circle',
+                    padding: 20,
+                    font: { family: 'Inter, sans-serif', size: 12 }
+                }
+            },
+            title: { 
+                display: true, 
+                text: `Serie de Tiempo y Pronóstico — ${ticker}`,
+                font: { family: 'Inter, sans-serif', size: 15, weight: '600' },
+                padding: { bottom: 16 },
+                color: '#232e3e'
+            },
             zoom: { 
                 pan: {
-                    enabled: true, // Habilitar paneo (mover el gráfico)
+                    enabled: true,
                     mode: 'xy',   
-                    threshold: 5, // Píxeles a mover antes de iniciar paneo
+                    threshold: 5,
                 },
                 zoom: {
-                    wheel: {
-                        enabled: true, // Habilitar zoom con rueda del ratón
-                    },
-                    pinch: {
-                        enabled: true // Habilitar zoom con "pellizco" en táctiles
-                    },
+                    wheel: { enabled: true },
+                    pinch: { enabled: true },
                     mode: 'xy', 
                 },
                 limits: { 
@@ -169,6 +182,14 @@ function GraphDisplay({ historicalData, forecastData, ticker }) {
             } 
         },
         scales: {
+            x: {
+                grid: { color: 'rgba(0,0,0,0.04)' },
+                ticks: { font: { size: 11 }, maxTicksLimit: 12 }
+            },
+            y: {
+                grid: { color: 'rgba(0,0,0,0.06)' },
+                ticks: { font: { size: 11 } }
+            }
         },
         interaction: {
             mode: 'index',

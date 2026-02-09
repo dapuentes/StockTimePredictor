@@ -15,7 +15,6 @@ import {
     InputNumber,
     Divider,
     Table,
-    Tooltip,
     Progress
 } from 'antd';
 import { 
@@ -54,7 +53,7 @@ ChartJS.register(
     Filler
 );
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { Option } = Select;
 
 /**
@@ -108,10 +107,10 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
 
     // Available models
     const allModels = [
-        { value: 'rf', label: 'Random Forest', color: '#52c41a' },
-        { value: 'xgboost', label: 'XGBoost', color: '#1890ff' },
-        { value: 'lstm', label: 'LSTM', color: '#722ed1' },
-        { value: 'prophet', label: 'Prophet', color: '#fa8c16' }
+        { value: 'rf', label: 'Random Forest', color: '#2f9e5a' },
+        { value: 'xgboost', label: 'XGBoost', color: '#2b6cb0' },
+        { value: 'lstm', label: 'LSTM', color: '#6b46c1' },
+        { value: 'prophet', label: 'Prophet', color: '#d69e2e' }
     ];
 
     // Fetch available models on mount
@@ -186,8 +185,8 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
             datasets.push({
                 label: `Ensemble (${ensembleMethod.replace('_', ' ')})`,
                 data: pred.ensemble_predictions,
-                borderColor: '#ff4d4f',
-                backgroundColor: 'rgba(255, 77, 79, 0.1)',
+                borderColor: '#c53030',
+                backgroundColor: 'rgba(197, 48, 48, 0.1)',
                 borderWidth: 3,
                 fill: false,
                 tension: 0.4
@@ -201,7 +200,7 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
                 datasets.push({
                     label: modelConfig?.label || model,
                     data: predictions,
-                    borderColor: modelConfig?.color || '#8c8c8c',
+                    borderColor: modelConfig?.color || '#8492a6',
                     borderWidth: 1.5,
                     borderDash: [5, 5],
                     fill: false,
@@ -215,8 +214,8 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
             datasets.push({
                 label: 'Intervalo de Confianza',
                 data: pred.confidence_interval.upper,
-                borderColor: 'rgba(255, 77, 79, 0.3)',
-                backgroundColor: 'rgba(255, 77, 79, 0.1)',
+                borderColor: 'rgba(197, 48, 48, 0.3)',
+                backgroundColor: 'rgba(197, 48, 48, 0.08)',
                 borderWidth: 1,
                 fill: '+1',
                 tension: 0.4,
@@ -225,7 +224,7 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
             datasets.push({
                 label: 'IC Lower',
                 data: pred.confidence_interval.lower,
-                borderColor: 'rgba(255, 77, 79, 0.3)',
+                borderColor: 'rgba(197, 48, 48, 0.3)',
                 backgroundColor: 'transparent',
                 borderWidth: 1,
                 fill: false,
@@ -247,10 +246,19 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
         plugins: {
             legend: {
                 position: 'top',
+                labels: {
+                    usePointStyle: true,
+                    pointStyle: 'circle',
+                    padding: 20,
+                    font: { family: 'Inter, sans-serif', size: 12 }
+                }
             },
             title: {
                 display: true,
-                text: `Predicción Ensemble - ${ticker}`
+                text: `Predicción Ensemble — ${ticker}`,
+                font: { family: 'Inter, sans-serif', size: 15, weight: '600' },
+                padding: { bottom: 16 },
+                color: '#232e3e'
             },
             tooltip: {
                 mode: 'index',
@@ -259,16 +267,14 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
         },
         scales: {
             y: {
-                title: {
-                    display: true,
-                    text: 'Precio ($)'
-                }
+                title: { display: true, text: 'Precio ($)' },
+                grid: { color: 'rgba(0,0,0,0.06)' },
+                ticks: { font: { size: 11 } }
             },
             x: {
-                title: {
-                    display: true,
-                    text: 'Fecha'
-                }
+                title: { display: true, text: 'Fecha' },
+                grid: { color: 'rgba(0,0,0,0.04)' },
+                ticks: { font: { size: 11 }, maxTicksLimit: 12 }
             }
         },
         interaction: {
@@ -305,7 +311,7 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
             key: 'change_percent',
             render: (val) => {
                 if (val === undefined) return 'N/A';
-                const color = val >= 0 ? '#52c41a' : '#ff4d4f';
+                const color = val >= 0 ? 'var(--color-success-500)' : 'var(--color-danger-500)';
                 return <span style={{ color }}>{val >= 0 ? '+' : ''}{val.toFixed(2)}%</span>;
             }
         },
@@ -321,8 +327,8 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
             key: 'status',
             render: (status) => (
                 status === 'success' 
-                    ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                    : <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+                    ? <CheckCircleOutlined style={{ color: 'var(--color-success-500)' }} />
+                    : <ExclamationCircleOutlined style={{ color: 'var(--color-warning-500)' }} />
             )
         }
     ];
@@ -332,7 +338,7 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
             className="ensemble-predictor-card"
             title={
                 <Space>
-                    <ClusterOutlined style={{ color: '#722ed1' }} />
+                    <ClusterOutlined style={{ color: 'var(--color-primary-600)' }} />
                     <span>Predictor Ensemble</span>
                     <Tag color="purple">{ticker}</Tag>
                 </Space>
@@ -359,8 +365,8 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
                 />
             )}
 
-            <div className="ensemble-info-banner" style={{ marginBottom: 16 }}>
-                <InfoCircleOutlined style={{ marginRight: 8, color: '#722ed1' }} />
+            <div className="info-banner info-banner--ensemble">
+                <InfoCircleOutlined style={{ color: '#6b46c1', flexShrink: 0 }} />
                 <Text type="secondary">
                     El modelo ensemble combina las predicciones de múltiples modelos para obtener 
                     una predicción más robusta y reducir la varianza del error.
@@ -460,7 +466,7 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
                                 title="Predicción Final" 
                                 value={data.prediction.ensemble_predictions?.slice(-1)[0]?.toFixed(2) || 'N/A'}
                                 prefix="$"
-                                valueStyle={{ color: '#3f8600' }}
+                                valueStyle={{ color: 'var(--color-success-600)' }}
                             />
                         </Col>
                         <Col span={6}>
@@ -549,38 +555,6 @@ const EnsemblePredictor = ({ ticker = 'NU', onPrediction, onError }) => {
                     />
                 )}
             </div>
-
-            <style>{`
-                .ensemble-predictor-card {
-                    border-radius: 12px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                }
-                
-                .ensemble-info-banner {
-                    background: #f9f0ff;
-                    padding: 12px 16px;
-                    border-radius: 8px;
-                    border-left: 4px solid #722ed1;
-                }
-                
-                .config-section {
-                    padding: 12px;
-                    background: #fafafa;
-                    border-radius: 8px;
-                    height: 100%;
-                }
-                
-                .loading-container {
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    padding: 60px;
-                }
-                
-                .comparison-section {
-                    margin-top: 16px;
-                }
-            `}</style>
         </Card>
     );
 };
