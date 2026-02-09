@@ -1,0 +1,92 @@
+# =============================================================================
+# Cloud Build — StockTime Predictor (Unified Architecture v3)
+# =============================================================================
+# Single image → single Cloud Run service.  Replaces the old 7-build pipeline.
+#
+# Usage:
+#   gcloud builds submit --config cloudbuild.unified.yaml
+#
+# Prerequisites:
+#   1. Enable Cloud Build, Cloud Run, and Artifact Registry APIs
+#   2. Create Artifact Registry repo:
+#        gcloud artifacts repositories create stocktime \
+#          --repository-format=docker --location=us-central1
+#   3. Grant Cloud Build SA → Cloud Run Admin + Service Account User
+#   4. Create GCS bucket for model storage
+# =============================================================================
+
+substitutions:
+  _REGION: us-central1
+  _GCS_BUCKET: stocktime-predictor-models
+  _AR_REPO: stocktime          # Artifact Registry repo name
+  _SERVICE: stocktime-api      # Cloud Run service name
+
+steps:
+  # -----------------------------------------------------------------------
+  # 1. Build unified Docker image (Artifact Registry, NOT deprecated gcr.io)
+  # -----------------------------------------------------------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest'
+      - '-f'
+      - 'Backend/cloud/Dockerfile'
+      - 'Backend'
+    id: 'build-unified'
+
+  # -----------------------------------------------------------------------
+  # 2. Push image
+  # -----------------------------------------------------------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}'
+    id: 'push-image'
+    waitFor: ['build-unified']
+
+  # -----------------------------------------------------------------------
+  # 3. Deploy to Cloud Run
+  # -----------------------------------------------------------------------
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--memory'
+      - '4Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '900'
+      - '--concurrency'
+      - '4'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '2'
+      - '--set-env-vars'
+      - 'GCS_BUCKET_NAME=${_GCS_BUCKET},GOOGLE_CLOUD_PROJECT=$PROJECT_ID,ALLOWED_ORIGINS=https://*.vercel.app'
+      - '--allow-unauthenticated'
+    id: 'deploy-service'
+    waitFor: ['push-image']
+
+# Push the image to Artifact Registry
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'    # faster builds for TensorFlow/Prophet
+  timeout: '1800s'                # 30 min build budget

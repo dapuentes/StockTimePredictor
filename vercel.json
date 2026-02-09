@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "framework": "create-react-app",
+  "buildCommand": "cd Frontend && npm run build",
+  "outputDirectory": "Frontend/build",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "${REACT_APP_API_URL}/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    }
+  ]
+}

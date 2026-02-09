@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// URL del API Gateway
-const API_GATEWAY_URL = 'http://localhost:8000'; // Ajusta si tu gateway corre en otro puerto
+// URL del API Gateway — uses env variable in production (Vercel), falls back to localhost
+const API_GATEWAY_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 export const trainModel = async (modelType, config) => {
     // Extraer y validar configuración
