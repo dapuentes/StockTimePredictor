@@ -119,16 +119,17 @@ celerybeat.pid
 # Machine Learning / Data Science
 # ================================
 
-# Model files (uncomment if you don't want to track models)
-# *.h5
-# *.hdf5
-# *.pkl
-# *.pickle
-# *.joblib
-# *.keras
-# *.pt
-# *.pth
-# *.onnx
+# Model files — stored in GCS for cloud, local ./models dirs for dev
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.joblib
+*.keras
+*.pt
+*.pth
+*.onnx
+**/models/*.json
 
 # Large data files
 *.csv
@@ -247,3 +248,11 @@ credentials/
 *.backup
 *.old
 *.orig
+
+# ================================
+# Deprecated cloud files (replaced by Backend/cloud/)
+# ================================
+*_cloud.py
+Dockerfile.cloud
+*.cloud.txt
+docker-compose.cloud.yml
